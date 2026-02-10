@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Hyak tracker",
+  "version": "0.1.0",
+  "action": { "default_popup": "popup.html" },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.hyakanime.fr/*",
+    "https://api-v5.hyakanime.fr/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/*", "src/*/*", "src/*/*/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
