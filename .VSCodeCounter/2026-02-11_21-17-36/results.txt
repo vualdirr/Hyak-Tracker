@@ -1,0 +1,50 @@
+Date : 2026-02-11 21:17:36
+Directory : e:\Hyak-Tracker
+Total : 13 files,  1897 codes, 127 comments, 397 blanks, all 2421 lines
+
+Languages
++------------+------------+------------+------------+------------+------------+
+| language   | files      | code       | comment    | blank      | total      |
++------------+------------+------------+------------+------------+------------+
+| JavaScript |         11 |      1,567 |        124 |        358 |      2,049 |
+| HTML       |          1 |        302 |          3 |         38 |        343 |
+| JSON       |          1 |         28 |          0 |          1 |         29 |
++------------+------------+------------+------------+------------+------------+
+
+Directories
++-------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                        | files      | code       | comment    | blank      | total      |
++-------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                           |         13 |      1,897 |        127 |        397 |      2,421 |
+| . (Files)                                                   |          5 |      1,319 |         64 |        256 |      1,639 |
+| src                                                         |          8 |        578 |         63 |        141 |        782 |
+| src\core                                                    |          1 |         47 |          4 |          5 |         56 |
+| src\modules                                                 |          6 |        353 |         42 |         93 |        488 |
+| src\modules\hyakanime                                       |          1 |         42 |          5 |         15 |         62 |
+| src\modules\playervideos                                    |          1 |        114 |          4 |         27 |        145 |
+| src\modules\playervideos\vidmoly                            |          1 |        114 |          4 |         27 |        145 |
+| src\modules\streaming                                       |          4 |        197 |         33 |         51 |        281 |
+| src\modules\streaming\anime-sama                            |          2 |         87 |          9 |         22 |        118 |
+| src\modules\streaming\voiranime                             |          2 |        110 |         24 |         29 |        163 |
+| src\shared                                                  |          1 |        178 |         17 |         43 |        238 |
++-------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-------------------------------------------------------------+------------+------------+------------+------------+------------+
+| filename                                                    | language   | code       | comment    | blank      | total      |
++-------------------------------------------------------------+------------+------------+------------+------------+------------+
+| e:\Hyak-Tracker\background.js                               | JavaScript |        314 |         16 |         65 |        395 |
+| e:\Hyak-Tracker\content.js                                  | JavaScript |         21 |          1 |          6 |         28 |
+| e:\Hyak-Tracker\manifest.json                               | JSON       |         28 |          0 |          1 |         29 |
+| e:\Hyak-Tracker\popup.html                                  | HTML       |        302 |          3 |         38 |        343 |
+| e:\Hyak-Tracker\popup.js                                    | JavaScript |        654 |         44 |        146 |        844 |
+| e:\Hyak-Tracker\src\core\registry.js                        | JavaScript |         47 |          4 |          5 |         56 |
+| e:\Hyak-Tracker\src\modules\hyakanime\index.js              | JavaScript |         42 |          5 |         15 |         62 |
+| e:\Hyak-Tracker\src\modules\playervideos\vidmoly\index.js   | JavaScript |        114 |          4 |         27 |        145 |
+| e:\Hyak-Tracker\src\modules\streaming\anime-sama\extract.js | JavaScript |         38 |          5 |         11 |         54 |
+| e:\Hyak-Tracker\src\modules\streaming\anime-sama\index.js   | JavaScript |         49 |          4 |         11 |         64 |
+| e:\Hyak-Tracker\src\modules\streaming\voiranime\extract.js  | JavaScript |         47 |         18 |         15 |         80 |
+| e:\Hyak-Tracker\src\modules\streaming\voiranime\index.js    | JavaScript |         63 |          6 |         14 |         83 |
+| e:\Hyak-Tracker\src\shared\autoMark.js                      | JavaScript |        178 |         17 |         43 |        238 |
+| Total                                                       |            |      1,897 |        127 |        397 |      2,421 |
++-------------------------------------------------------------+------------+------------+------------+------------+------------+

@@ -1,0 +1,15 @@
+"filename", "language", "HTML", "JSON", "JavaScript", "comment", "blank", "total"
+"e:\Hyak-Tracker\background.js", "JavaScript", 0, 0, 314, 16, 65, 395
+"e:\Hyak-Tracker\content.js", "JavaScript", 0, 0, 21, 1, 6, 28
+"e:\Hyak-Tracker\manifest.json", "JSON", 0, 28, 0, 0, 1, 29
+"e:\Hyak-Tracker\popup.html", "HTML", 302, 0, 0, 3, 38, 343
+"e:\Hyak-Tracker\popup.js", "JavaScript", 0, 0, 654, 44, 146, 844
+"e:\Hyak-Tracker\src\core\registry.js", "JavaScript", 0, 0, 47, 4, 5, 56
+"e:\Hyak-Tracker\src\modules\hyakanime\index.js", "JavaScript", 0, 0, 42, 5, 15, 62
+"e:\Hyak-Tracker\src\modules\playervideos\vidmoly\index.js", "JavaScript", 0, 0, 114, 4, 27, 145
+"e:\Hyak-Tracker\src\modules\streaming\anime-sama\extract.js", "JavaScript", 0, 0, 38, 5, 11, 54
+"e:\Hyak-Tracker\src\modules\streaming\anime-sama\index.js", "JavaScript", 0, 0, 49, 4, 11, 64
+"e:\Hyak-Tracker\src\modules\streaming\voiranime\extract.js", "JavaScript", 0, 0, 47, 18, 15, 80
+"e:\Hyak-Tracker\src\modules\streaming\voiranime\index.js", "JavaScript", 0, 0, 63, 6, 14, 83
+"e:\Hyak-Tracker\src\shared\autoMark.js", "JavaScript", 0, 0, 178, 17, 43, 238
+"Total", "-", 302, 28, 1567, 127, 397, 2421
