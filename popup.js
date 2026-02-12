@@ -1,5 +1,4 @@
 const $ = (id) => document.getElementById(id);
-const API_V5 = "https://api-v5.hyakanime.fr";
 
 let selectedAnimeId = null;
 let currentDomain = null;
@@ -131,8 +130,8 @@ async function getActiveTabStreamContext(tabId) {
 
     const total = Number.isFinite(knownTotalEpisodes)
       ? knownTotalEpisodes
-      : Number.isFinite(selectedAnimeMedia?.NbEpisodes)
-        ? selectedAnimeMedia.NbEpisodes
+      : Number.isFinite(selectedAnimeMedia?.totalEpisodes)
+        ? selectedAnimeMedia.totalEpisodes
         : null;
 
     // statut diffusion animé: 1=en cours, 2=prochainement, 3=terminé
@@ -187,7 +186,7 @@ async function getActiveTabStreamContext(tabId) {
 
     if (!res?.ok) {
       return log(
-        `Erreur write (${res?.status || "?"}): ${JSON.stringify(res?.data)}`,
+        `Erreur write (${res?.status || "?"}): ${JSON.stringify(res?.error || res)}`,
       );
     }
 
@@ -509,12 +508,25 @@ function norm(s) {
 
 function getAllTitles(anime) {
   const arr = [];
-  if (anime.title) arr.push(anime.title);
-  if (anime.titleEN) arr.push(anime.titleEN);
-  if (anime.titleJP) arr.push(anime.titleJP);
-  if (anime.romanji) arr.push(anime.romanji);
-  if (Array.isArray(anime.alt)) arr.push(...anime.alt);
-  return arr.filter(Boolean);
+
+  // ✅ Nouveau format wrapper
+  if (anime?.displayTitle) arr.push(anime.displayTitle);
+
+  const t = anime?.titles;
+  if (t?.fr) arr.push(t.fr);
+  if (t?.en) arr.push(t.en);
+  if (t?.jp) arr.push(t.jp);
+  if (t?.romaji) arr.push(t.romaji);
+
+  // ✅ Ancien format brut (compat)
+  if (anime?.title) arr.push(anime.title);
+  if (anime?.titleEN) arr.push(anime.titleEN);
+  if (anime?.titleJP) arr.push(anime.titleJP);
+  if (anime?.romanji) arr.push(anime.romanji);
+  if (Array.isArray(anime?.alt)) arr.push(...anime.alt);
+
+  // unique + cleanup
+  return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))];
 }
 
 function similarity(a, b) {
@@ -622,7 +634,16 @@ function renderChoices(ranked) {
     const btn = document.createElement("button");
     btn.className = "choiceBtn";
     const display =
-      it.title || it.titleEN || it.romanji || it.titleJP || "(sans titre)";
+      it.displayTitle ||
+      it.titles?.fr ||
+      it.titles?.en ||
+      it.titles?.romaji ||
+      it.titles?.jp ||
+      it.title ||
+      it.titleEN ||
+      it.romanji ||
+      it.titleJP ||
+      "(sans titre)";
     btn.textContent = `Choisir ${(score * 100).toFixed(0)}% — ${display.slice(0, 36)}`;
     btn.addEventListener("click", () => selectAnime(it));
     $("choices").appendChild(btn);
@@ -667,23 +688,23 @@ async function selectAnime(anime) {
 
   if (!selectedAnimeId) return;
 
-  // ✅ Nouvelle source de vérité: progression/anime/:uid/:id
-  if (!hykToken || !hykUid) {
-    log("ℹ️ Détails progression non chargés: token/uid manquant.");
+  if (!hykUid) {
+    log("ℹ️ Détails progression non chargés: uid manquant.");
     return;
   }
 
   try {
-    const data = await fetchProgressionAnime(hykUid, selectedAnimeId, hykToken);
+    const data = await fetchProgressionAnime(hykUid, selectedAnimeId);
 
-    // data: { media, progression, isFavorite }
-    selectedAnimeMedia = data?.media || null;
-    selectedAnimeProgressionRow = data?.progression || null;
-    knownProgression = Number.isFinite(data?.progression?.progression)
-      ? data.progression.progression
+    selectedAnimeMedia = data?.media ?? null;
+    selectedAnimeProgressionRow = data?.progress ?? null;
+
+    knownProgression = Number.isFinite(data?.progress?.currentEpisode)
+      ? data.progress.currentEpisode
       : null;
-    knownTotalEpisodes = Number.isFinite(selectedAnimeMedia?.NbEpisodes)
-      ? selectedAnimeMedia.NbEpisodes
+
+    knownTotalEpisodes = Number.isFinite(data?.media?.totalEpisodes)
+      ? data.media.totalEpisodes
       : null;
 
     renderBanner({
@@ -706,11 +727,7 @@ async function selectAnime(anime) {
       log(`📺 Total épisodes: ${knownTotalEpisodes}`);
     }
   } catch (e) {
-    log(
-      `⚠️ Impossible de charger /progression/anime/${hykUid}/${selectedAnimeId}: ${String(
-        e?.message || e,
-      )}`,
-    );
+    log(`⚠️ Impossible de charger la progression: ${String(e?.message || e)}`);
   }
 }
 
@@ -722,39 +739,35 @@ function log(s) {
 
 const progCache = new Map(); // key `${uid}:${animeId}` -> data
 
-async function fetchProgressionAnime(uid, animeId, token) {
+async function fetchProgressionAnime(uid, animeId) {
   const key = `${uid}:${animeId}`;
   if (progCache.has(key)) return progCache.get(key);
 
-  const res = await fetch(`${API_V5}/progression/anime/${uid}/${animeId}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+  const res = await chrome.runtime.sendMessage({
+    type: "GET_PROGRESSION_ANIME",
+    uid,
+    animeId,
   });
 
-  if (!res.ok) {
+  if (!res?.ok) {
     throw new Error(
-      `GET /progression/anime/${uid}/${animeId} failed: ${res.status}`,
+      `GET_PROGRESSION_ANIME failed: ${res?.status || "?"} (${res?.error || "unknown"})`,
     );
   }
 
-  const data = await res.json();
-  progCache.set(key, data);
-  return data;
+  progCache.set(key, res.data);
+  return res.data;
 }
 
 // ---------- Banner rendering ----------
 
 function getDisplayTitleMedia(m) {
-  const t = (m?.title || "").trim();
-  if (t) return t;
-
   return (
-    (m?.titleEN || "").trim() ||
-    (m?.romanji || "").trim() ||
-    (m?.titleJP || "").trim() ||
+    (m?.displayTitle || "").trim() ||
+    (m?.titles?.fr || "").trim() ||
+    (m?.titles?.romaji || "").trim() ||
+    (m?.titles?.en || "").trim() ||
+    (m?.titles?.jp || "").trim() ||
     "—"
   );
 }
@@ -834,8 +847,8 @@ function renderBanner({
     : "Sélectionne un animé…";
 
   // ✅ bannerURL prioritaire, fallback image
-  const bannerImg = media?.bannerURL || media?.image || "";
-  const posterImg = media?.image || "";
+  const bannerImg = media?.bannerUrl || "";
+  const posterImg = media?.posterUrl || "";
 
   bannerBgEl.style.backgroundImage = bannerImg ? `url("${bannerImg}")` : "";
   posterEl.src = posterImg || "";
