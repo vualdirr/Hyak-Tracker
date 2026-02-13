@@ -1,3 +1,4 @@
+<!-- E:\Hyak-Tracker\popup.html -->
 <!doctype html>
 <html lang="fr">
   <head>
@@ -6,29 +7,46 @@
   </head>
 
   <body>
-    <!-- Banner -->
+    <!-- Banner (commune) -->
     <div class="banner" id="banner">
       <div class="bannerBg" id="bannerBg"></div>
       <div class="bannerShade"></div>
 
-      <!-- Meta row AU-DESSUS -->
       <div class="bannerMetaRow">
         <span class="bannerApp">Hyak Tracker</span>
         <span class="pill" id="pageDomain">—</span>
         <span id="animeStatusPill" class="pill pill--muted hidden">—</span>
       </div>
 
-      <!-- Contenu AU MEME NIVEAU QUE L'IMAGE -->
       <div class="bannerRow">
         <img class="poster" id="poster" alt="" />
         <div class="bannerText">
           <div class="animeTitle" id="bannerTitle">—</div>
-          <div class="subtitle" id="bannerSub">Sélectionne un animé…</div>
+          <div class="subtitle" id="bannerSub">—</div>
         </div>
       </div>
     </div>
 
-    <!-- MAIN VIEW -->
+    <!-- ROOT VIEW (racine site streaming) -->
+    <div id="viewRoot" class="hidden">
+      <button id="btnSettingsRoot" title="Ouvrir les paramètres">
+        ⚙️ Paramètres
+      </button>
+      <pre id="logRoot" class="hidden"></pre>
+    </div>
+
+    <!-- UNSUPPORTED VIEW -->
+    <div id="viewUnsupported" class="hidden">
+      <button id="btnSettingsUnsupported" title="Ouvrir les paramètres">
+        ⚙️ Paramètres
+      </button>
+
+      <div id="unsupportedMessage" class="unsupportedMessage"></div>
+
+      <pre id="logUnsupported" class="hidden"></pre>
+    </div>
+
+    <!-- EPISODE VIEW -->
     <div id="viewMain">
       <label>Titre</label>
       <div class="fieldRow">
@@ -42,7 +60,6 @@
 
       <button id="btnSearch" class="hidden">Trouver sur Hyakanime</button>
 
-      <!-- ⚙️ Paramètres (remplace l'ancien bouton Marquage auto) -->
       <button id="btnSettings" title="Ouvrir les paramètres">
         ⚙️ Paramètres
       </button>
@@ -86,6 +103,6 @@
       <pre id="logSettings" class="hidden"></pre>
     </div>
 
-    <script src="popup.js"></script>
+    <script type="module" src="src/popup/index.js"></script>
   </body>
 </html>

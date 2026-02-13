@@ -9,7 +9,7 @@ export function unwrapData(raw) {
  * Canonicalise un objet progression/anime/:uid/:animeId
  * On garde le brut dans `raw` pour debug si besoin.
  */
-export function normalizeProgressionDetail(raw, { debug = false } = {}) {
+export function normalizeProgressionDetail(raw = {}) {
   const x = unwrapData(raw) || {};
 
   // Réponse brute API attendue: { media, progression, isFavorite }
@@ -82,11 +82,10 @@ export function normalizeProgressionDetail(raw, { debug = false } = {}) {
     media,
     progress,
     isFavorite: x.isFavorite ?? null,
-    raw: debug ? a : undefined,
   };
 }
 
-export function normalizeAnimeSearch(raw, { debug = false } = {}) {
+export function normalizeAnimeSearch(raw = {}) {
   const list = unwrapData(raw);
   if (!Array.isArray(list)) return [];
 
@@ -111,7 +110,6 @@ export function normalizeAnimeSearch(raw, { debug = false } = {}) {
       poster: a?.poster ?? a?.image ?? null,
       status: a?.status ?? null,
       totalEpisodes: a?.NbEpisodes ?? a?.totalEpisodes ?? null,
-      raw: debug ? a : undefined,
     };
   });
 }
