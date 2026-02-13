@@ -1,17 +1,6 @@
 // src/modules/playervideos/vidmoly/index.js
 import { createAutoMarker } from "../../../shared/autoMark.js";
-
-// ⚠️ doit matcher la clé utilisée pour animeLinkMap
-function norm(s) {
-  return (s || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[\[\(].*?[\]\)]/g, " ")
-    .replace(/(vostfr|vf|multi|hd|1080p|720p|x264|x265|web|bluray)/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
+import { norm } from "../../../shared/player/norm.js";
 
 function makeAnimeKey(title, season) {
   const s = Number.isFinite(season) && season > 0 ? season : 1;

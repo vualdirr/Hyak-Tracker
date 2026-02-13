@@ -3,14 +3,35 @@
   "name": "Hyak tracker",
   "version": "0.1.0",
   "action": { "default_popup": "popup.html" },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "permissions": ["storage"],
   "host_permissions": [
     "https://www.hyakanime.fr/*",
-    "https://api-v5.hyakanime.fr/*"
+    "https://api-v5.hyakanime.fr/*",
+    "https://anime-sama.tv/*",
+    "https://*.anime-sama.tv/*",
+    "https://voiranime.com/*",
+    "https://*.voiranime.com/*",
+    "https://vidmoly.biz/*",
+    "https://*.vidmoly.biz/*"
   ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://www.hyakanime.fr/*",
+        "https://hyakanime.fr/*",
+        "https://anime-sama.tv/*",
+        "https://*.anime-sama.tv/*",
+        "https://voiranime.com/*",
+        "https://*.voiranime.com/*",
+        "https://vidmoly.biz/*",
+        "https://*.vidmoly.biz/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": true
@@ -23,7 +44,16 @@
   "web_accessible_resources": [
     {
       "resources": ["src/*", "src/*/*", "src/*/*/*"],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "https://www.hyakanime.fr/*",
+        "https://hyakanime.fr/*",
+        "https://anime-sama.tv/*",
+        "https://*.anime-sama.tv/*",
+        "https://voiranime.com/*",
+        "https://*.voiranime.com/*",
+        "https://vidmoly.biz/*",
+        "https://*.vidmoly.biz/*"
+      ]
     }
   ]
 }
