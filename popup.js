@@ -20,8 +20,28 @@ async function getActiveTabStreamContext(tabId) {
   return res?.ctx || null;
 }
 
+// ---------- View state (main/settings) ----------
+let currentView = "main";
+
+function setView(next) {
+  currentView = next === "settings" ? "settings" : "main";
+
+  // Pages
+  $("viewMain")?.classList.toggle("hidden", currentView !== "main");
+  $("viewSettings")?.classList.toggle("hidden", currentView !== "settings");
+
+  // Dans les paramètres: on masque les infos "classiques" (bannière)
+  $("banner")?.classList.toggle("hidden", currentView === "settings");
+}
+
 (async function init() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  setView("main");
+  try {
+    await getSettings(); // init + migration si besoin
+    await applyDebugVisibilityFromSettings();
+  } catch {}
 
   try {
     const ctx = await getActiveTabStreamContext(tab.id);
@@ -94,22 +114,39 @@ async function getActiveTabStreamContext(tabId) {
     await runHyakanimeSearch({ manual: true });
   });
 
-  // --- Toggle auto-mark ---
-  const btnAuto = $("btnAutoMark");
-  if (btnAuto) {
-    const enabled = await getAutoMarkEnabled();
-    btnAuto.textContent = enabled
-      ? "Marquage auto : ON"
-      : "Marquage auto : OFF";
+  // --- Navigation Paramètres ---
+  $("btnSettings")?.addEventListener("click", async () => {
+    setView("settings");
+    await syncSettingsUI();
+    await applyDebugVisibilityFromSettings();
+    logSettings("ℹ️ Paramètres ouverts.");
+  });
 
-    btnAuto.addEventListener("click", async () => {
-      const cur = await getAutoMarkEnabled();
-      const next = !cur;
-      await setAutoMarkEnabled(next);
-      btnAuto.textContent = next ? "Marquage auto : ON" : "Marquage auto : OFF";
-      log(next ? "✅ Marquage auto activé." : "⛔ Marquage auto désactivé.");
-    });
-  }
+  $("btnBack")?.addEventListener("click", () => {
+    setView("main");
+  });
+
+  // --- Toggles (Settings view) ---
+  $("toggleAutoMark")?.addEventListener("click", async () => {
+    const s = await getSettings();
+    const next = !s.autoMark;
+    await updateSettings({ autoMark: next });
+    await syncSettingsUI();
+    logSettings(
+      next ? "✅ Marquage auto activé." : "⛔ Marquage auto désactivé.",
+    );
+  });
+
+  $("toggleDebug")?.addEventListener("click", async () => {
+    const s = await getSettings();
+    const next = !s.debug;
+
+    await updateSettings({ debug: next });
+    await syncSettingsUI();
+
+    applyDebugVisibility(next);
+    logSettings(next ? "✅ Mode debug activé." : "⛔ Mode debug désactivé.");
+  });
 
   // Bouton write
   $("btnWrite")?.addEventListener("click", async () => {
@@ -465,13 +502,79 @@ async function runHyakanimeSearch({ manual }) {
   renderChoices(ranked);
 }
 
-// ---------- Ranking (inchangé) ----------
-
 const STORAGE_KEYS = {
+  SETTINGS: "settings",
+  // legacy (compat) : ancienne clé
   AUTO: "autoMarkEnabled",
   UID: "hyakanimeUid",
   MAP: "animeLinkMap",
 };
+
+const DEFAULT_SETTINGS = {
+  autoMark: false,
+  debug: false,
+  qoe: true,
+};
+
+async function getSettings() {
+  const s = await chrome.storage.local.get([
+    STORAGE_KEYS.SETTINGS,
+    STORAGE_KEYS.AUTO, // legacy
+  ]);
+
+  // déjà au bon format
+  const cur = s[STORAGE_KEYS.SETTINGS];
+  if (cur && typeof cur === "object") {
+    return {
+      ...DEFAULT_SETTINGS,
+      ...cur,
+      autoMark: !!cur.autoMark,
+      debug: !!cur.debug,
+      qoe: !!cur.qoe,
+    };
+  }
+
+  // migration legacy autoMarkEnabled -> settings.autoMark
+  const legacyAuto = s[STORAGE_KEYS.AUTO];
+  const migrated = {
+    ...DEFAULT_SETTINGS,
+    autoMark: !!legacyAuto,
+  };
+  await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+  return migrated;
+}
+
+async function updateSettings(patch) {
+  const cur = await getSettings();
+  const next = {
+    ...cur,
+    ...patch,
+    autoMark: patch?.autoMark != null ? !!patch.autoMark : !!cur.autoMark,
+    debug: patch?.debug != null ? !!patch.debug : !!cur.debug,
+    qoe: patch?.qoe != null ? !!patch.qoe : !!cur.qoe,
+  };
+
+  await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: next });
+
+  // compat legacy
+  if (patch?.autoMark != null) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.AUTO]: !!next.autoMark });
+  }
+
+  return next;
+}
+
+// Compat: si d'autres endroits appellent encore ces fonctions
+async function getAutoMarkEnabled() {
+  const s = await getSettings();
+  return !!s.autoMark;
+}
+
+async function setAutoMarkEnabled(v) {
+  await updateSettings({ autoMark: !!v });
+}
+
+// ---------- Ranking (inchangé) ----------
 
 async function getAutoMarkEnabled() {
   const s = await chrome.storage.local.get(STORAGE_KEYS.AUTO);
@@ -853,4 +956,35 @@ function renderBanner({
   bannerBgEl.style.backgroundImage = bannerImg ? `url("${bannerImg}")` : "";
   posterEl.src = posterImg || "";
   posterEl.style.display = posterImg ? "block" : "none";
+}
+
+function logSettings(s) {
+  const el = $("logSettings");
+  if (!el) return;
+  el.textContent = (s + "\n\n" + el.textContent).slice(0, 4000);
+}
+
+function setToggleButton(el, enabled) {
+  if (!el) return;
+  el.textContent = enabled ? "ON" : "OFF";
+  el.title = enabled ? "Désactiver" : "Activer";
+}
+
+async function syncSettingsUI() {
+  const s = await getSettings();
+  setToggleButton($("toggleAutoMark"), !!s.autoMark);
+  setToggleButton($("toggleDebug"), !!s.debug);
+}
+
+function applyDebugVisibility(enabled) {
+  // Logs (main view)
+  $("log")?.classList.toggle("hidden", !enabled);
+
+  // Logs (settings view)
+  $("logSettings")?.classList.toggle("hidden", !enabled);
+}
+
+async function applyDebugVisibilityFromSettings() {
+  const s = await getSettings();
+  applyDebugVisibility(!!s.debug);
 }

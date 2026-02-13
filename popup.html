@@ -2,296 +2,7 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <style>
-      :root {
-        --bg: #0b0f1a;
-        --card: #121a2b;
-        --muted: rgba(255, 255, 255, 0.72);
-        --muted2: rgba(255, 255, 255, 0.55);
-        --text: rgba(255, 255, 255, 0.92);
-        --accent: #7c5cff;
-        --ring: rgba(124, 92, 255, 0.35);
-        --border: rgba(255, 255, 255, 0.1);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        font-family:
-          system-ui,
-          -apple-system,
-          Segoe UI,
-          Roboto,
-          sans-serif;
-        margin: 12px;
-        width: 360px;
-        background: var(--bg);
-        color: var(--text);
-      }
-
-      /* --- Header/Banner --- */
-      .banner {
-        position: relative;
-        border-radius: 16px;
-        overflow: hidden;
-        border: 1px solid var(--border);
-        background: linear-gradient(
-          135deg,
-          rgba(124, 92, 255, 0.25),
-          rgba(0, 0, 0, 0)
-        );
-        min-height: 120px;
-      }
-
-      .bannerBg {
-        position: absolute;
-        inset: 0;
-        background-size: cover;
-        background-position: center;
-        transform: scale(1.12);
-        filter: blur(10px) saturate(1.1);
-      }
-
-      .bannerShade {
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(
-          180deg,
-          rgba(0, 0, 0, 0.1) 0%,
-          rgba(0, 0, 0, 0.55) 55%,
-          rgba(0, 0, 0, 0.8) 100%
-        );
-      }
-
-      .bannerRow {
-        position: relative;
-        display: flex;
-        gap: 10px;
-        padding: 12px;
-        align-items: flex-start; /* ⬅️ haut */
-        min-height: 120px;
-      }
-
-      .poster {
-        width: 60px;
-        height: 84px;
-        margin-top: 2px;
-        border-radius: 10px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
-        object-fit: cover;
-        flex: 0 0 auto;
-      }
-
-      .bannerText {
-        min-width: 0;
-      }
-      .brand {
-        font-weight: 800;
-        letter-spacing: 0.3px;
-        font-size: 13px;
-        color: rgba(255, 255, 255, 0.9);
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .pill {
-        font-size: 11px;
-        padding: 3px 8px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--muted);
-      }
-
-      .animeTitle {
-        margin-top: 6px;
-        font-size: 16px;
-        font-weight: 800;
-        line-height: 1.15;
-        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 260px;
-      }
-
-      .subtitle {
-        margin-top: 4px;
-        font-size: 12px;
-        color: var(--muted2);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 260px;
-      }
-
-      /* --- Form --- */
-      label {
-        display: block;
-        margin-top: 10px;
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      input {
-        width: 100%;
-        padding: 10px 10px;
-        margin: 6px 0;
-        border-radius: 12px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--text);
-        outline: none;
-      }
-      input:focus {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 4px var(--ring);
-      }
-
-      button {
-        width: 100%;
-        padding: 10px;
-        margin-top: 8px;
-        cursor: pointer;
-        border-radius: 12px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--text);
-      }
-      button:hover {
-        background: rgba(255, 255, 255, 0.1);
-      }
-      button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
-      .fieldRow {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .fieldRow input {
-        flex: 1;
-      }
-
-      .choiceBtn {
-        padding: 10px;
-        margin-top: 6px;
-        border-radius: 12px;
-        text-align: left;
-      }
-
-      .hidden {
-        display: none;
-      }
-
-      .small {
-        font-size: 12px;
-        opacity: 0.85;
-        color: var(--muted2);
-      }
-
-      pre {
-        white-space: pre-wrap;
-        word-break: break-word;
-        background: rgba(255, 255, 255, 0.06);
-        padding: 10px;
-        border-radius: 12px;
-        border: 1px solid var(--border);
-        color: rgba(255, 255, 255, 0.86);
-      }
-
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.18rem 0.55rem;
-        border-radius: 999px;
-        font-size: 0.78rem;
-        font-weight: 600;
-        line-height: 1.2;
-      }
-
-      .pill::before {
-        content: "";
-        width: 0.55rem;
-        height: 0.55rem;
-        border-radius: 999px;
-        background: currentColor;
-        opacity: 0.9;
-      }
-
-      .pill--blue {
-        color: #3b82f6;
-        background: rgba(59, 130, 246, 0.12);
-      }
-      .pill--green {
-        color: #22c55e;
-        background: rgba(34, 197, 94, 0.12);
-      }
-      .pill--yellow {
-        color: #fbbf24;
-        background: rgba(251, 191, 36, 0.12);
-      }
-      .pill--muted {
-        color: #94a3b8;
-        background: rgba(148, 163, 184, 0.12);
-      }
-
-      .hidden {
-        display: none !important;
-      }
-
-      .bannerRow--stack {
-        flex-direction: column;
-        align-items: stretch;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 12px;
-        min-height: 120px;
-      }
-
-      .poster--bottom {
-        align-self: flex-start;
-        width: 52px;
-        height: 72px;
-      }
-
-      /* Le texte prend toute la largeur */
-      .bannerRow--stack .bannerText {
-        min-width: 0;
-      }
-
-      /* Meta row: statut à droite */
-      .bannerMetaRow {
-        position: relative;
-        z-index: 2;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 12px 0;
-      }
-
-      .bannerApp {
-        font-weight: 800;
-        letter-spacing: 0.3px;
-        font-size: 13px;
-        color: rgba(255, 255, 255, 0.9);
-        white-space: nowrap;
-      }
-
-      .bannerMetaRow #animeStatusPill {
-        margin-left: auto; /* statut à droite */
-      }
-
-      #pageDomain {
-        margin-left: 6px;
-      }
-    </style>
+    <link rel="stylesheet" href="popup.css" />
   </head>
 
   <body>
@@ -317,25 +28,63 @@
       </div>
     </div>
 
-    <label>Titre</label>
-    <div class="fieldRow">
-      <input id="title" placeholder="Saisis…" />
+    <!-- MAIN VIEW -->
+    <div id="viewMain">
+      <label>Titre</label>
+      <div class="fieldRow">
+        <input id="title" placeholder="Saisis…" />
+      </div>
+
+      <label>Épisode</label>
+      <div class="fieldRow">
+        <input id="episode" placeholder="Épisode" />
+      </div>
+
+      <button id="btnSearch" class="hidden">Trouver sur Hyakanime</button>
+
+      <!-- ⚙️ Paramètres (remplace l'ancien bouton Marquage auto) -->
+      <button id="btnSettings" title="Ouvrir les paramètres">
+        ⚙️ Paramètres
+      </button>
+
+      <button id="btnWrite" disabled>Marquer “vu”</button>
+
+      <div id="choices"></div>
+      <pre id="log" class="hidden"></pre>
     </div>
 
-    <label>Épisode</label>
-    <div class="fieldRow">
-      <input id="episode" placeholder="Épisode" />
+    <!-- SETTINGS VIEW -->
+    <div id="viewSettings" class="hidden">
+      <div class="settingsHeader">
+        <button id="btnBack" class="iconBtn" title="Retour">←</button>
+        <div class="settingsTitle">Paramètres</div>
+      </div>
+
+      <div class="settingsCard">
+        <div class="settingsRow">
+          <div>
+            <div class="settingsLabel">Marquage automatique</div>
+            <div class="settingsHint">
+              Marque automatiquement l’épisode quand les conditions sont
+              remplies.
+            </div>
+          </div>
+          <button id="toggleAutoMark" class="toggleBtn">—</button>
+        </div>
+
+        <div class="settingsRow">
+          <div>
+            <div class="settingsLabel">Mode debug</div>
+            <div class="settingsHint">
+              Affiche plus d’infos et de logs (pour support/dev).
+            </div>
+          </div>
+          <button id="toggleDebug" class="toggleBtn">—</button>
+        </div>
+      </div>
+
+      <pre id="logSettings" class="hidden"></pre>
     </div>
-
-    <button id="btnSearch" class="hidden">Trouver sur Hyakanime</button>
-    <label>Marquage auto</label>
-    <button id="btnAutoMark" title="Active/désactive le marquage automatique">
-      —
-    </button>
-    <button id="btnWrite" disabled>Marquer “vu”</button>
-
-    <div id="choices"></div>
-    <pre id="log"></pre>
 
     <script src="popup.js"></script>
   </body>
