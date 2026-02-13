@@ -1,4 +1,22 @@
+// E:\Hyak-Tracker\src\popup\views\episode.js
+import { setView } from "./viewState.js";
+import {
+  getSettings,
+  updateSettings,
+  syncSettingsUI,
+  applyDebugVisibility,
+  applyDebugVisibilityFromSettings,
+} from "./settings.js";
+import {
+  getToken,
+  getStreamContext,
+  sendMessage,
+} from "../services/runtime.js";
+
 const $ = (id) => document.getElementById(id);
+
+// -------------------- État local (vue épisode) --------------------
+let booted = false;
 
 let selectedAnimeId = null;
 let currentDomain = null;
@@ -12,279 +30,108 @@ let selectedAnimeProgressionRow = null; // progression serveur complète (startD
 let knownProgression = null; // progression actuelle côté serveur (number | null)
 let knownTotalEpisodes = null; // NbEpisodes (number | null)
 
-async function getActiveTabStreamContext(tabId) {
-  const res = await chrome.runtime.sendMessage({
-    type: "GET_STREAM_CONTEXT",
-    tabId,
-  });
-  return res?.ctx || null;
-}
+const progCache = new Map(); // key `${uid}:${animeId}` -> data
 
-// ---------- View state (main/settings) ----------
-let currentView = "main";
+const STORAGE_KEYS = {
+  SETTINGS: "settings",
+  AUTO_LEGACY: "autoMarkEnabled",
+  UID: "hyakanimeUid",
+  MAP: "animeLinkMap",
+};
 
-function setView(next) {
-  currentView = next === "settings" ? "settings" : "main";
+// -------------------- Public API --------------------
+export async function renderEpisodeView(pctx) {
+  setView("episode");
 
-  // Pages
-  $("viewMain")?.classList.toggle("hidden", currentView !== "main");
-  $("viewSettings")?.classList.toggle("hidden", currentView !== "settings");
-
-  // Dans les paramètres: on masque les infos "classiques" (bannière)
-  $("banner")?.classList.toggle("hidden", currentView === "settings");
-}
-
-(async function init() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-  setView("main");
+  // init settings UI (debug visibility)
   try {
-    await getSettings(); // init + migration si besoin
+    await getSettings();
     await applyDebugVisibilityFromSettings();
   } catch {}
 
-  try {
-    const ctx = await getActiveTabStreamContext(tab.id);
-    if (ctx) {
-      pageCtx = ctx;
-      currentDomain = ctx.domain || currentDomain;
+  // (re)bind listeners une seule fois
+  if (!booted) {
+    booted = true;
+    bindEpisodeInputListeners();
+    bindSearchWriteListeners();
+  }
 
-      renderBanner({
-        media: selectedAnimeMedia,
-        titleFallback: ctx.title || "—",
-        episode: ctx.episode || "",
-        season: ctx.season || "",
-        currentProgression: knownProgression,
-        totalEpisodes: knownTotalEpisodes,
-      });
+  // domain
+  currentDomain = pctx.hostname || currentDomain;
 
-      if (ctx.title) $("title").value = ctx.title;
-      if (ctx.episode) $("episode").value = ctx.episode;
+  // ctx streaming (tab-scoped)
+  const ctx = pctx.tabId ? await getStreamContext(pctx.tabId) : null;
+  if (ctx) {
+    pageCtx = ctx;
+    currentDomain = ctx.domain || currentDomain;
 
-      updateWriteButtonState();
-      log("ℹ️ Contexte détecté (tab-scoped).");
-    }
-  } catch {}
+    if (ctx.title) $("title").value = ctx.title;
+    if (ctx.episode) $("episode").value = ctx.episode;
+
+    renderBanner({
+      media: selectedAnimeMedia,
+      titleFallback: ctx.title || "—",
+      episode: ctx.episode || "",
+      season: ctx.season || "",
+      currentProgression: knownProgression,
+      totalEpisodes: knownTotalEpisodes,
+    });
+
+    updateWriteButtonState();
+    log("ℹ️ Contexte détecté (tab-scoped).");
+  } else {
+    // Pas de ctx => on reste en mode manuel, mais on garde la vue épisode
+    renderBanner({
+      media: null,
+      titleFallback: ($("title")?.value || "").trim() || "—",
+      episode: ($("episode")?.value || "").trim(),
+      season: "",
+      currentProgression: knownProgression,
+      totalEpisodes: knownTotalEpisodes,
+    });
+    showSearchButton(true);
+    log("ℹ️ Contexte streaming non disponible (mode manuel).");
+  }
 
   // Token Hyakanime
-  const t = await chrome.runtime.sendMessage({ type: "GET_TOKEN" });
-  if (!t?.token) {
-    log(
-      "⚠️ Pas de token Hyakanime. Ouvre Hyakanime (connecté) dans un onglet puis réessaie.",
-    );
-  } else {
-    hykToken = t.token;
-    const payload = safeDecodeJwtPayload(hykToken);
-    hykUid = payload?.uid || payload?._id || payload?.sub || null;
-    if (hykUid) {
-      await chrome.storage.local.set({ hyakanimeUid: hykUid });
-    }
-    try {
-      const titleForKey = (($("title")?.value || "").trim() || "").trim();
-      const seasonForKey = pageCtx?.season ? parseInt(pageCtx.season, 10) : 1;
-      if (titleForKey && selectedAnimeId) {
-        await upsertAnimeLink(titleForKey, seasonForKey, selectedAnimeId);
-      }
-    } catch {}
+  await ensureTokenAndUid();
 
-    if (!hykUid) {
-      log(
-        "⚠️ Token détecté mais uid introuvable dans le payload (attendu: uid/_id/sub).",
-      );
-    } else {
-      log("✅ Token Hyakanime détecté (uid OK).");
-    }
-  }
-
-  // Re-évaluer le verrouillage si l'utilisateur modifie l'épisode à la main
-  $("episode")?.addEventListener("input", () => {
-    updateWriteButtonState();
-    renderBanner({
-      media: selectedAnimeMedia,
-      titleFallback: ($("title")?.value || "").trim() || "—",
-      episode: ($("episode")?.value || "").trim(),
-      season: pageCtx?.season || "",
-      currentProgression: knownProgression,
-      totalEpisodes: knownTotalEpisodes,
-    });
-  });
-
-  // Bouton recherche (fallback manuel)
-  $("btnSearch")?.addEventListener("click", async () => {
-    await runHyakanimeSearch({ manual: true });
-  });
-
-  // --- Navigation Paramètres ---
-  $("btnSettings")?.addEventListener("click", async () => {
-    setView("settings");
-    await syncSettingsUI();
-    await applyDebugVisibilityFromSettings();
-    logSettings("ℹ️ Paramètres ouverts.");
-  });
-
-  $("btnBack")?.addEventListener("click", () => {
-    setView("main");
-  });
-
-  // --- Toggles (Settings view) ---
-  $("toggleAutoMark")?.addEventListener("click", async () => {
-    const s = await getSettings();
-    const next = !s.autoMark;
-    await updateSettings({ autoMark: next });
-    await syncSettingsUI();
-    logSettings(
-      next ? "✅ Marquage auto activé." : "⛔ Marquage auto désactivé.",
-    );
-  });
-
-  $("toggleDebug")?.addEventListener("click", async () => {
-    const s = await getSettings();
-    const next = !s.debug;
-
-    await updateSettings({ debug: next });
-    await syncSettingsUI();
-
-    applyDebugVisibility(next);
-    logSettings(next ? "✅ Mode debug activé." : "⛔ Mode debug désactivé.");
-  });
-
-  // Bouton write
-  $("btnWrite")?.addEventListener("click", async () => {
-    const ep = parseInt($("episode")?.value || "", 10);
-    if (!selectedAnimeId || !Number.isFinite(ep)) {
-      return log("Il faut un animeId + un numéro d’épisode.");
-    }
-
-    // 🔒 Anti-downgrade + évite requête inutile si déjà vu
-    if (Number.isFinite(knownProgression) && knownProgression >= ep) {
-      updateWriteButtonState();
-      return log(
-        `🔒 Déjà vu: ta progression Hyakanime est à l'épisode ${knownProgression}. (Aucune action nécessaire)`,
-      );
-    }
-
-    const nowISO = new Date().toISOString();
-
-    const total = Number.isFinite(knownTotalEpisodes)
-      ? knownTotalEpisodes
-      : Number.isFinite(selectedAnimeMedia?.totalEpisodes)
-        ? selectedAnimeMedia.totalEpisodes
-        : null;
-
-    // statut diffusion animé: 1=en cours, 2=prochainement, 3=terminé
-    const isAnimeFinished = selectedAnimeMedia?.status === 3;
-
-    // On repart de la progression serveur complète (si on l'a), pour éviter d'écraser des champs.
-    const base = selectedAnimeProgressionRow
-      ? { ...selectedAnimeProgressionRow }
-      : {};
-
-    // Payload minimal + champs utiles serveur
-    const payload = {
-      id: selectedAnimeId,
-      animeID: selectedAnimeId,
-      progression: ep,
-      status: 1,
-
-      // On forward start/end/lastChange si déjà connus
-      ...(base.lastChange != null ? { lastChange: base.lastChange } : {}),
-      ...(base.startDate != null ? { startDate: base.startDate } : {}),
-      ...(base.endDate != null ? { endDate: base.endDate } : {}),
-    };
-
-    // startDate: uniquement quand on marque vu l'épisode 1
-    if (ep === 1 && !payload.startDate) {
-      payload.startDate = nowISO;
-    }
-
-    // endDate: uniquement si dernier épisode ET animé terminé (pas en diffusion)
-    if (
-      total != null &&
-      total > 0 &&
-      ep === total &&
-      isAnimeFinished &&
-      !payload.endDate
-    ) {
-      if (!payload.startDate && base.startDate) {
-        payload.startDate = base.startDate;
-      }
-      payload.endDate = nowISO;
-
-      // ✅ Marquer la progression comme "terminé"
-      payload.status = 3;
-    }
-
-    log("Envoi progression:\n" + JSON.stringify(payload, null, 2));
-
-    const res = await chrome.runtime.sendMessage({
-      type: "WRITE_PROGRESSION",
-      ...payload,
-    });
-
-    if (!res?.ok) {
-      return log(
-        `Erreur write (${res?.status || "?"}): ${JSON.stringify(res?.error || res)}`,
-      );
-    }
-
-    log("✅ Progression mise à jour.");
-
-    // Met à jour notre état local + UI (sans attendre une refetch)
-    if (!Number.isFinite(knownProgression) || ep > knownProgression) {
-      knownProgression = ep;
-    }
-    updateWriteButtonState();
-    renderBanner({
-      media: selectedAnimeMedia,
-      titleFallback: ($("title")?.value || "").trim() || "—",
-      episode: ($("episode")?.value || "").trim(),
-      season: pageCtx?.season || "",
-      currentProgression: knownProgression,
-      totalEpisodes: knownTotalEpisodes,
-    });
-  });
-
-  pageCtx = pageCtx || (await getActiveTabStreamContext(tab.id));
-
-  if (!pageCtx) {
-    showSearchButton(true);
-    return log(
-      "ℹ️ Ouvre une page supportée (anime-sama) pour détecter titre/épisode.",
-    );
-  }
-
-  renderBanner({
-    media: null,
-    titleFallback: pageCtx.title || "—",
-    episode: pageCtx.episode || "",
-    season: pageCtx.season || "",
-    currentProgression: null,
-    totalEpisodes: null,
-  });
-
-  if (pageCtx.title) $("title").value = pageCtx.title;
-  if (pageCtx.episode) $("episode").value = pageCtx.episode;
+  // Si pas de pageCtx, on autorise la recherche manuelle
+  pageCtx = pageCtx || ctx;
 
   // Si titre absent => mode manuel
   if (!hasTitle()) {
     showSearchButton(true);
-    log("ℹ️ Titre manquant. Ce site n’est pas encore supporté.");
-    return;
+    log("ℹ️ Titre manquant. Saisis un titre puis recherche.");
   }
 
   // Si épisode absent => on peut chercher mais pas écrire
   if (!hasEpisode()) {
     $("btnWrite").disabled = true;
     showSearchButton(true);
-    log("ℹ️ Épisode non détecté sur ce site.");
-    // on ne return pas: on peut quand même lancer la recherche auto
+    log("ℹ️ Épisode non détecté (ou vide).");
   }
 
-  // Auto-search (si titre OK)
-  await runHyakanimeSearch({ manual: false });
+  // Auto-search si titre OK
+  if (hasTitle()) {
+    await runHyakanimeSearch({ manual: false });
+  }
 
-  setInterval(async () => {
-    const ctx = await getActiveTabStreamContext(tab.id);
+  // Poll (temporaire) : refresh ctx si la page change d’épisode (SPA)
+  // (on optimisera après en supprimant ce setInterval)
+  if (pctx.tabId) {
+    startCtxPolling(pctx.tabId);
+  }
+}
+
+// -------------------- Polling ctx (temporaire) --------------------
+let pollTimer = null;
+
+function startCtxPolling(tabId) {
+  if (pollTimer) return;
+
+  pollTimer = setInterval(async () => {
+    const ctx = await getStreamContext(tabId);
     if (!ctx) return;
 
     const changed =
@@ -312,16 +159,145 @@ function setView(next) {
 
     updateWriteButtonState();
   }, 1000);
-})();
+}
 
-// ---------- JWT helpers ----------
+// -------------------- Listeners --------------------
+function bindEpisodeInputListeners() {
+  $("episode")?.addEventListener("input", () => {
+    updateWriteButtonState();
+    renderBanner({
+      media: selectedAnimeMedia,
+      titleFallback: ($("title")?.value || "").trim() || "—",
+      episode: ($("episode")?.value || "").trim(),
+      season: pageCtx?.season || "",
+      currentProgression: knownProgression,
+      totalEpisodes: knownTotalEpisodes,
+    });
+  });
+}
+
+function bindSearchWriteListeners() {
+  $("btnSearch")?.addEventListener("click", async () => {
+    await runHyakanimeSearch({ manual: true });
+  });
+
+  $("btnWrite")?.addEventListener("click", async () => {
+    const ep = parseInt($("episode")?.value || "", 10);
+    if (!selectedAnimeId || !Number.isFinite(ep)) {
+      return log("Il faut un animeId + un numéro d’épisode.");
+    }
+
+    // 🔒 Anti-downgrade + évite requête inutile si déjà vu
+    if (Number.isFinite(knownProgression) && knownProgression >= ep) {
+      updateWriteButtonState();
+      return log(
+        `🔒 Déjà vu: ta progression Hyakanime est à l'épisode ${knownProgression}. (Aucune action nécessaire)`,
+      );
+    }
+
+    const nowISO = new Date().toISOString();
+
+    const total = Number.isFinite(knownTotalEpisodes)
+      ? knownTotalEpisodes
+      : Number.isFinite(selectedAnimeMedia?.totalEpisodes)
+        ? selectedAnimeMedia.totalEpisodes
+        : null;
+
+    // statut diffusion animé: 1=en cours, 2=prochainement, 3=terminé
+    const isAnimeFinished = selectedAnimeMedia?.status === 3;
+
+    const base = selectedAnimeProgressionRow
+      ? { ...selectedAnimeProgressionRow }
+      : {};
+
+    const payload = {
+      id: selectedAnimeId,
+      animeID: selectedAnimeId,
+      progression: ep,
+      status: 1,
+
+      ...(base.lastChange != null ? { lastChange: base.lastChange } : {}),
+      ...(base.startDate != null ? { startDate: base.startDate } : {}),
+      ...(base.endDate != null ? { endDate: base.endDate } : {}),
+    };
+
+    if (ep === 1 && !payload.startDate) {
+      payload.startDate = nowISO;
+    }
+
+    if (
+      total != null &&
+      total > 0 &&
+      ep === total &&
+      isAnimeFinished &&
+      !payload.endDate
+    ) {
+      if (!payload.startDate && base.startDate) {
+        payload.startDate = base.startDate;
+      }
+      payload.endDate = nowISO;
+      payload.status = 3;
+    }
+
+    log("Envoi progression:\n" + JSON.stringify(payload, null, 2));
+
+    const res = await sendMessage({
+      type: "WRITE_PROGRESSION",
+      ...payload,
+    });
+
+    if (!res?.ok) {
+      return log(
+        `Erreur write (${res?.status || "?"}): ${JSON.stringify(res?.error || res)}`,
+      );
+    }
+
+    log("✅ Progression mise à jour.");
+
+    if (!Number.isFinite(knownProgression) || ep > knownProgression) {
+      knownProgression = ep;
+    }
+
+    updateWriteButtonState();
+    renderBanner({
+      media: selectedAnimeMedia,
+      titleFallback: ($("title")?.value || "").trim() || "—",
+      episode: ($("episode")?.value || "").trim(),
+      season: pageCtx?.season || "",
+      currentProgression: knownProgression,
+      totalEpisodes: knownTotalEpisodes,
+    });
+  });
+}
+
+// -------------------- Token / UID --------------------
+async function ensureTokenAndUid() {
+  const t = await getToken();
+
+  if (!t?.token) {
+    log(
+      "⚠️ Pas de token Hyakanime. Ouvre Hyakanime (connecté) dans un onglet puis réessaie.",
+    );
+    return;
+  }
+
+  hykToken = t.token;
+  const payload = safeDecodeJwtPayload(hykToken);
+  hykUid = payload?.uid || payload?._id || payload?.sub || null;
+
+  if (hykUid) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.UID]: hykUid });
+    log("✅ Token Hyakanime détecté (uid OK).");
+  } else {
+    log("⚠️ Token détecté mais uid introuvable dans le payload (uid/_id/sub).");
+  }
+}
 
 function safeDecodeJwtPayload(token) {
   try {
     const part = String(token || "").split(".")[1];
     if (!part) return null;
 
-    // base64url -> base64
     const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
     const json = decodeURIComponent(
       atob(b64)
@@ -336,7 +312,7 @@ function safeDecodeJwtPayload(token) {
   }
 }
 
-// ---------- UI / State ----------
+// -------------------- UI / State --------------------
 function hasTitle() {
   return !!($("title")?.value || "").trim();
 }
@@ -353,12 +329,10 @@ function updateWriteButtonState() {
   const ep = parseInt($("episode")?.value || "", 10);
   const btn = $("btnWrite");
 
-  // état par défaut
   let disabled = !selectedAnimeId || !hasEpisode();
   let label = "Marquer “vu”";
   let title = "";
 
-  // 🔒 Déjà vu ou downgrade → bouton désactivé
   if (
     !disabled &&
     Number.isFinite(ep) &&
@@ -375,20 +349,19 @@ function updateWriteButtonState() {
   btn.title = title;
 }
 
+// -------------------- Search / Ranking --------------------
 function buildSearchQueries(title, seasonHint) {
   const q = String(title || "").trim();
   const n = parseInt(seasonHint, 10);
 
-  // Saison 1 / inconnue → recherche simple
   if (!Number.isFinite(n) || n <= 1) return [q];
-
-  // Saison > 1 → templates progressifs
   return [`${q} saison ${n}`, `${q} season ${n}`, `${q} s${n}`, q];
 }
 
 async function runHyakanimeSearch({ manual }) {
   selectedAnimeId = null;
   selectedAnimeMedia = null;
+  selectedAnimeProgressionRow = null;
   knownProgression = null;
   knownTotalEpisodes = null;
 
@@ -401,7 +374,6 @@ async function runHyakanimeSearch({ manual }) {
     return log("Entre un titre valide pour rechercher l’animé.");
   }
 
-  // Hint saison interne (jamais affiché en champ UI)
   const seasonHint = pageCtx?.season ? parseInt(pageCtx.season, 10) : null;
   const queries = buildSearchQueries(title, seasonHint);
 
@@ -413,11 +385,7 @@ async function runHyakanimeSearch({ manual }) {
   const seen = new Set();
 
   for (const q of queries) {
-    const res = await chrome.runtime.sendMessage({
-      type: "SEARCH_ANIME",
-      query: q,
-    });
-
+    const res = await sendMessage({ type: "SEARCH_ANIME", query: q });
     if (!res?.ok) continue;
 
     const items = Array.isArray(res.data)
@@ -466,7 +434,6 @@ async function runHyakanimeSearch({ manual }) {
     });
   }
 
-  // Si on a un hint de saison > 1, on évite le "root exact"
   if (Number.isFinite(seasonHint) && seasonHint > 1) {
     const rootNorm = norm(title);
     const filtered = ranked.filter((r) => norm(r.matchedOn || "") !== rootNorm);
@@ -481,7 +448,6 @@ async function runHyakanimeSearch({ manual }) {
     return;
   }
 
-  // Si auto et score faible, on montre le bouton + choix
   if (!manual && ranked[0].score < 0.72) {
     showSearchButton(true);
     renderChoices(ranked);
@@ -494,98 +460,9 @@ async function runHyakanimeSearch({ manual }) {
     return;
   }
 
-  // Sinon on auto-select le top
   await selectAnime(ranked[0].it);
   showSearchButton(false);
-
-  // Laisse quand même les alternatives visibles
   renderChoices(ranked);
-}
-
-const STORAGE_KEYS = {
-  SETTINGS: "settings",
-  // legacy (compat) : ancienne clé
-  AUTO: "autoMarkEnabled",
-  UID: "hyakanimeUid",
-  MAP: "animeLinkMap",
-};
-
-const DEFAULT_SETTINGS = {
-  autoMark: false,
-  debug: false,
-  qoe: true,
-};
-
-async function getSettings() {
-  const s = await chrome.storage.local.get([
-    STORAGE_KEYS.SETTINGS,
-    STORAGE_KEYS.AUTO, // legacy
-  ]);
-
-  // déjà au bon format
-  const cur = s[STORAGE_KEYS.SETTINGS];
-  if (cur && typeof cur === "object") {
-    return {
-      ...DEFAULT_SETTINGS,
-      ...cur,
-      autoMark: !!cur.autoMark,
-      debug: !!cur.debug,
-      qoe: !!cur.qoe,
-    };
-  }
-
-  // migration legacy autoMarkEnabled -> settings.autoMark
-  const legacyAuto = s[STORAGE_KEYS.AUTO];
-  const migrated = {
-    ...DEFAULT_SETTINGS,
-    autoMark: !!legacyAuto,
-  };
-  await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
-  return migrated;
-}
-
-async function updateSettings(patch) {
-  const cur = await getSettings();
-  const next = {
-    ...cur,
-    ...patch,
-    autoMark: patch?.autoMark != null ? !!patch.autoMark : !!cur.autoMark,
-    debug: patch?.debug != null ? !!patch.debug : !!cur.debug,
-    qoe: patch?.qoe != null ? !!patch.qoe : !!cur.qoe,
-  };
-
-  await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: next });
-
-  // compat legacy
-  if (patch?.autoMark != null) {
-    await chrome.storage.local.set({ [STORAGE_KEYS.AUTO]: !!next.autoMark });
-  }
-
-  return next;
-}
-
-// ---------- Ranking (inchangé) ----------
-
-async function getAutoMarkEnabled() {
-  const s = await chrome.storage.local.get(STORAGE_KEYS.AUTO);
-  return s[STORAGE_KEYS.AUTO] ?? false; // défaut OFF
-}
-
-async function setAutoMarkEnabled(v) {
-  await chrome.storage.local.set({ [STORAGE_KEYS.AUTO]: !!v });
-}
-
-function makeAnimeKey(title, season) {
-  const s = Number.isFinite(season) && season > 0 ? season : 1;
-  return `${norm(title)}|s${s}`;
-}
-
-async function upsertAnimeLink(title, season, animeId) {
-  const key = makeAnimeKey(title, season);
-  const s = await chrome.storage.local.get(STORAGE_KEYS.MAP);
-  const map = s[STORAGE_KEYS.MAP] || {};
-  map[key] = { animeId, titleRaw: title, season: season ?? 1, ts: Date.now() };
-  await chrome.storage.local.set({ [STORAGE_KEYS.MAP]: map });
 }
 
 function norm(s) {
@@ -602,7 +479,6 @@ function norm(s) {
 function getAllTitles(anime) {
   const arr = [];
 
-  // ✅ Nouveau format wrapper
   if (anime?.displayTitle) arr.push(anime.displayTitle);
 
   const t = anime?.titles;
@@ -611,14 +487,12 @@ function getAllTitles(anime) {
   if (t?.jp) arr.push(t.jp);
   if (t?.romaji) arr.push(t.romaji);
 
-  // ✅ Ancien format brut (compat)
   if (anime?.title) arr.push(anime.title);
   if (anime?.titleEN) arr.push(anime.titleEN);
   if (anime?.titleJP) arr.push(anime.titleJP);
   if (anime?.romanji) arr.push(anime.romanji);
   if (Array.isArray(anime?.alt)) arr.push(...anime.alt);
 
-  // unique + cleanup
   return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))];
 }
 
@@ -677,14 +551,12 @@ function rank(items, query) {
       .map((raw) => ({ raw, n: norm(raw) }))
       .filter((x) => x.n);
 
-    // 1) Perfect match exact
     for (const t of titles) {
       if (t.n === q) {
         return { it, score: 1.0, matchedOn: t.raw, perfect: true };
       }
     }
 
-    // 2) Sinon: meilleur score
     let best = 0;
     let matchedOn = null;
 
@@ -715,8 +587,7 @@ function rank(items, query) {
   return ranked;
 }
 
-// ---------- UI helpers ----------
-
+// -------------------- Choices UI --------------------
 function clearChoices() {
   $("choices").innerHTML = "";
 }
@@ -726,6 +597,7 @@ function renderChoices(ranked) {
   ranked.forEach(({ it, score }) => {
     const btn = document.createElement("button");
     btn.className = "choiceBtn";
+
     const display =
       it.displayTitle ||
       it.titles?.fr ||
@@ -737,14 +609,31 @@ function renderChoices(ranked) {
       it.romanji ||
       it.titleJP ||
       "(sans titre)";
+
     btn.textContent = `Choisir ${(score * 100).toFixed(0)}% — ${display.slice(0, 36)}`;
     btn.addEventListener("click", () => selectAnime(it));
     $("choices").appendChild(btn);
   });
 }
 
+// -------------------- LinkMap (animeId cache) --------------------
+function makeAnimeKey(title, season) {
+  const s = Number.isFinite(season) && season > 0 ? season : 1;
+  return `${norm(title)}|s${s}`;
+}
+
+async function upsertAnimeLink(title, season, animeId) {
+  const key = makeAnimeKey(title, season);
+  const s = await chrome.storage.local.get(STORAGE_KEYS.MAP);
+  const map = s[STORAGE_KEYS.MAP] || {};
+  map[key] = { animeId, titleRaw: title, season: season ?? 1, ts: Date.now() };
+  await chrome.storage.local.set({ [STORAGE_KEYS.MAP]: map });
+}
+
+// -------------------- Anime selection + progression fetch --------------------
 async function selectAnime(anime) {
   selectedAnimeId = anime?.id ?? null;
+
   try {
     const titleForKey = ($("title")?.value || "").trim();
     const seasonForKey = pageCtx?.season ? parseInt(pageCtx.season, 10) : 1;
@@ -753,13 +642,14 @@ async function selectAnime(anime) {
       await upsertAnimeLink(titleForKey, seasonForKey, selectedAnimeId);
     }
   } catch {}
+
   selectedAnimeMedia = null;
+  selectedAnimeProgressionRow = null;
   knownProgression = null;
   knownTotalEpisodes = null;
 
   updateWriteButtonState();
 
-  // Render immédiat (fallback texte)
   renderBanner({
     media: null,
     titleFallback:
@@ -813,30 +703,20 @@ async function selectAnime(anime) {
 
     const t = getDisplayTitleMedia(selectedAnimeMedia);
     log(`🎴 Media+progression chargés: ${t}`);
-    if (Number.isFinite(knownProgression)) {
+    if (Number.isFinite(knownProgression))
       log(`📊 Progression Hyakanime: ${knownProgression}`);
-    }
-    if (Number.isFinite(knownTotalEpisodes)) {
+    if (Number.isFinite(knownTotalEpisodes))
       log(`📺 Total épisodes: ${knownTotalEpisodes}`);
-    }
   } catch (e) {
     log(`⚠️ Impossible de charger la progression: ${String(e?.message || e)}`);
   }
 }
 
-function log(s) {
-  $("log").textContent = (s + "\n\n" + $("log").textContent).slice(0, 4000);
-}
-
-// ---------- API ----------
-
-const progCache = new Map(); // key `${uid}:${animeId}` -> data
-
 async function fetchProgressionAnime(uid, animeId) {
   const key = `${uid}:${animeId}`;
   if (progCache.has(key)) return progCache.get(key);
 
-  const res = await chrome.runtime.sendMessage({
+  const res = await sendMessage({
     type: "GET_PROGRESSION_ANIME",
     uid,
     animeId,
@@ -852,8 +732,7 @@ async function fetchProgressionAnime(uid, animeId) {
   return res.data;
 }
 
-// ---------- Banner rendering ----------
-
+// -------------------- Banner rendering (copié/compatible) --------------------
 function getDisplayTitleMedia(m) {
   return (
     (m?.displayTitle || "").trim() ||
@@ -866,14 +745,10 @@ function getDisplayTitleMedia(m) {
 }
 
 function getAnimeDiffusionStatus(media) {
-  // status diffusion de l'anime (vu dans /anime/:id)
-  // 1 = en cours, 2 = prochainement, 3 = terminé
   const s = media?.status;
-
   if (s === 1) return { label: "En cours", cls: "pill--blue" };
   if (s === 2) return { label: "Prochainement", cls: "pill--yellow" };
   if (s === 3) return { label: "Terminé", cls: "pill--green" };
-
   return { label: "Inconnu", cls: "pill--muted" };
 }
 
@@ -881,7 +756,6 @@ function setPill(el, { label, cls }) {
   if (!el) return;
   el.textContent = label;
 
-  // reset classes
   el.classList.remove(
     "pill--blue",
     "pill--yellow",
@@ -919,11 +793,9 @@ function renderBanner({
   bannerTitleEl.textContent = title;
 
   const parts = [];
-
   if (season) parts.push(`Saison ${season}`);
   if (episode) parts.push(`Épisode ${episode}`);
 
-  // Affichage progression/total si dispo
   const p = Number.isFinite(currentProgression) ? currentProgression : null;
   const tEp = Number.isFinite(totalEpisodes) ? totalEpisodes : null;
 
@@ -939,7 +811,6 @@ function renderBanner({
     ? parts.join(" • ")
     : "Sélectionne un animé…";
 
-  // ✅ bannerURL prioritaire, fallback image
   const bannerImg = media?.bannerUrl || "";
   const posterImg = media?.posterUrl || "";
 
@@ -948,33 +819,15 @@ function renderBanner({
   posterEl.style.display = posterImg ? "block" : "none";
 }
 
+// -------------------- Logs --------------------
+function log(s) {
+  const el = $("log");
+  if (!el) return;
+  el.textContent = (String(s) + "\n\n" + el.textContent).slice(0, 4000);
+}
+
 function logSettings(s) {
   const el = $("logSettings");
   if (!el) return;
-  el.textContent = (s + "\n\n" + el.textContent).slice(0, 4000);
-}
-
-function setToggleButton(el, enabled) {
-  if (!el) return;
-  el.textContent = enabled ? "ON" : "OFF";
-  el.title = enabled ? "Désactiver" : "Activer";
-}
-
-async function syncSettingsUI() {
-  const s = await getSettings();
-  setToggleButton($("toggleAutoMark"), !!s.autoMark);
-  setToggleButton($("toggleDebug"), !!s.debug);
-}
-
-function applyDebugVisibility(enabled) {
-  // Logs (main view)
-  $("log")?.classList.toggle("hidden", !enabled);
-
-  // Logs (settings view)
-  $("logSettings")?.classList.toggle("hidden", !enabled);
-}
-
-async function applyDebugVisibilityFromSettings() {
-  const s = await getSettings();
-  applyDebugVisibility(!!s.debug);
+  el.textContent = (String(s) + "\n\n" + el.textContent).slice(0, 4000);
 }
