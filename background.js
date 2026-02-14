@@ -149,14 +149,61 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   }
 });
 
+function base64UrlToBase64(s) {
+  return String(s)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(Math.ceil(String(s).length / 4) * 4, "=");
+}
+
+function safeDecodeJwtPayload(token) {
+  try {
+    const t = String(token || "").trim();
+    const raw = t.startsWith("Bearer ") ? t.slice(7) : t;
+
+    const part = raw.split(".")[1];
+    if (!part) return null;
+
+    const json = atob(base64UrlToBase64(part));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ✅ Init-only: si uid absent et token présent, tente de dériver uid depuis token (JWT).
+ * - ne suppose pas que c'est toujours un JWT: si ça échoue -> no-op.
+ */
+async function ensureUidFromStoredToken() {
+  const s = await chrome.storage.local.get(["hyakanimeUid", "hyakanimeToken"]);
+
+  if (s.hyakanimeUid) return;
+
+  const token = s.hyakanimeToken || null;
+  if (!token) return;
+
+  const payload = safeDecodeJwtPayload(token);
+  const uid = payload?.uid || payload?._id || payload?.sub || null;
+
+  if (!uid) return;
+
+  await chrome.storage.local.set({ hyakanimeUid: uid });
+  logger.info("UID Hyakanime initialisé depuis token (startup/install)", {
+    uid,
+  });
+}
+
 chrome.runtime.onStartup.addListener(() => {
   purgeAllLogs();
   cleanupAnimeLinkMap().catch(() => {});
+  ensureUidFromStoredToken().catch(() => {});
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   purgeAllLogs();
   cleanupAnimeLinkMap().catch(() => {});
+  ensureUidFromStoredToken().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -549,6 +596,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           known: wr.data?.known ?? undefined,
           wanted: wr.data?.wanted ?? undefined,
         });
+        return;
+      }
+
+      // ----- LIST USER PROGRESSION (for calendrier) -----
+      if (msg?.type === "GET_USER_PROGRESSION_LIST") {
+        const s = await chrome.storage.local.get(["hyakanimeUid"]);
+        const uid = s.hyakanimeUid || null;
+
+        if (!uid) {
+          sendResponse({ ok: false, error: "NO_UID" });
+          return;
+        }
+
+        logger.debug("GET_USER_PROGRESSION_LIST", { uid });
+
+        // ✅ Vérifié dans ton wrapper: progression.listByUid(uid)
+        const r = await hyakApi.progression.listByUid(uid);
+
+        if (!r.ok) {
+          logger.error("GET_USER_PROGRESSION_LIST échec", r.error);
+          sendResponse({
+            ok: false,
+            status: r.error?.status ?? 0,
+            error: r.error,
+          });
+          return;
+        }
+
+        logger.info("GET_USER_PROGRESSION_LIST succès", {
+          count: Array.isArray(r.data) ? r.data.length : 0,
+        });
+
+        sendResponse({ ok: true, uid, data: r.data });
         return;
       }
 

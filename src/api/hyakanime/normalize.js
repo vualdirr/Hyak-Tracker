@@ -12,9 +12,16 @@ export function unwrapData(raw) {
 export function normalizeProgressionDetail(raw = {}) {
   const x = unwrapData(raw) || {};
 
-  // Réponse brute API attendue: { media, progression, isFavorite }
   const mediaRaw = x.media ?? x.anime ?? x.data?.media ?? null;
   const progRaw = x.progression ?? x.data?.progression ?? null;
+
+  // ✅ nextEpisode timestamp ms (number ou string)
+  const nextEpisode =
+    typeof x.nextEpisode === "number"
+      ? x.nextEpisode
+      : x.nextEpisode != null && x.nextEpisode !== ""
+        ? Number(x.nextEpisode)
+        : null;
 
   // --- Media ---
   const titleFr = mediaRaw?.title ? String(mediaRaw.title).trim() : "";
@@ -81,6 +88,7 @@ export function normalizeProgressionDetail(raw = {}) {
   return {
     media,
     progress,
+    nextEpisode,
     isFavorite: x.isFavorite ?? null,
   };
 }

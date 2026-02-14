@@ -27,6 +27,25 @@ export default {
   async run(api) {
     api.log("anime-sama (streaming) module attached");
 
+    // Guard: n'attacher le flow que si on détecte la page épisode (ou au moins le bloc épisode)
+    const select = document.querySelector("#selectEpisodes");
+    const titleEl = document.querySelector("#titreOeuvre");
+
+    if (!select || !titleEl) {
+      api.log(
+        "Page non-épisode détectée (guard). Module inactif sur cette page.",
+        {
+          hasSelectEpisodes: !!select,
+          hasTitreOeuvre: !!titleEl,
+          url: location.href,
+        },
+      );
+      // On ne met aucun observer/listener, et surtout pas de premier fire()
+      return () => {
+        api.log("anime-sama (streaming) module detached (guard no-op)");
+      };
+    }
+
     api.log("Initialisation debounce extract", { delay: 150 });
 
     const fire = debounce(async (meta) => {
@@ -79,36 +98,26 @@ export default {
     fire({ kind: "init", reason: "startup" });
 
     // 2) Change episode via select
-    const select = document.querySelector("#selectEpisodes");
     const onChange = () => fire({ kind: "change", reason: "selectEpisode" });
 
-    if (select) {
-      select.addEventListener("change", onChange, { passive: true });
-      api.log("Listener change attaché sur #selectEpisodes");
-    } else {
-      api.log("Select #selectEpisodes non trouvé");
-    }
+    select.addEventListener("change", onChange, { passive: true });
+    api.log("Listener change attaché sur #selectEpisodes");
 
     // 3) Mutation observer on select (SPA quirks)
-    let mo = null;
-    if (select) {
-      mo = new MutationObserver(() =>
-        fire({ kind: "mut", reason: "selectMutation" }),
-      );
-      mo.observe(select, { childList: true, subtree: true, attributes: true });
-      api.log("MutationObserver attaché sur #selectEpisodes");
-    }
+    const mo = new MutationObserver(() =>
+      fire({ kind: "mut", reason: "selectMutation" }),
+    );
+    mo.observe(select, { childList: true, subtree: true, attributes: true });
+    api.log("MutationObserver attaché sur #selectEpisodes");
 
     return () => {
       try {
-        if (select) {
-          select.removeEventListener("change", onChange);
-          api.log("Listener change retiré");
-        }
+        select.removeEventListener("change", onChange);
+        api.log("Listener change retiré");
       } catch {}
 
       try {
-        mo?.disconnect();
+        mo.disconnect();
         api.log("MutationObserver déconnecté");
       } catch {}
 
