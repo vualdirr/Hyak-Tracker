@@ -1,4 +1,4 @@
-// src/modules/playervideos/vidmoly/index.js
+// E:\Hyak-Tracker\src\modules\playervideos\vidmoly\index.js
 import { createAutoMarker } from "../../../shared/autoMark.js";
 import { norm } from "../../../shared/player/norm.js";
 
@@ -22,6 +22,7 @@ export default {
     }
 
     async function getAutoEnabled() {
+      // ⚠️ appelé très souvent par autoMark -> NE PAS logger ici (sinon spam)
       const s = await chrome.storage.local.get("autoMarkEnabled");
       return s.autoMarkEnabled ?? false;
     }
@@ -30,13 +31,52 @@ export default {
     let cachedCtx = null;
     let ctxPollTimer = null;
 
+    // Anti-spam: log uniquement quand le contexte change réellement
+    let lastCtxSig = null;
+    let hadCtx = false;
+
+    function ctxSignature(ctx) {
+      if (!ctx) return "null";
+      const title = ctx?.title ?? "";
+      const season = ctx?.season ?? 1;
+      const episode = ctx?.episode ?? "";
+      return `${norm(title)}|s${season}|e${episode}`;
+    }
+
     async function refreshCtx() {
       try {
         const res = await chrome.runtime.sendMessage({
           type: "GET_STREAM_CONTEXT",
         });
-        cachedCtx = res?.ctx || null;
-      } catch {
+        const nextCtx = res?.ctx || null;
+
+        const nextSig = ctxSignature(nextCtx);
+        if (nextSig !== lastCtxSig) {
+          // log seulement sur changement
+          api.log("STREAM_CONTEXT updated", {
+            hasCtx: !!nextCtx,
+            title: nextCtx?.title ?? null,
+            season: nextCtx?.season ?? null,
+            episode: nextCtx?.episode ?? null,
+          });
+          lastCtxSig = nextSig;
+        }
+
+        // log transitions (utile debug) : ctx présent -> absent / absent -> présent
+        if (!!nextCtx !== hadCtx) {
+          hadCtx = !!nextCtx;
+          api.log("STREAM_CONTEXT presence changed", { hasCtx: hadCtx });
+        }
+
+        cachedCtx = nextCtx;
+      } catch (e) {
+        // log uniquement si on passe en erreur (ou si on n’avait pas déjà ctx null)
+        if (lastCtxSig !== "error") {
+          api.log("STREAM_CONTEXT refresh failed", {
+            message: e?.message,
+          });
+          lastCtxSig = "error";
+        }
         cachedCtx = null;
       }
     }
@@ -46,6 +86,7 @@ export default {
 
     const autoMarker = createAutoMarker({
       getEpisodeKey: () => {
+        // ⚠️ appelé très souvent -> NE PAS logger ici (sinon spam)
         if (cachedCtx?.title && cachedCtx?.episode) {
           const s = cachedCtx.season ?? 1;
           return `${norm(cachedCtx.title)}|s${s}|e${cachedCtx.episode}`;
@@ -82,6 +123,13 @@ export default {
           return;
         }
 
+        api.log("Automark commit demandé", {
+          title: ctx.title,
+          season: ctx.season ?? 1,
+          episode: ep,
+          animeKey: makeAnimeKey(ctx.title, ctx.season ?? 1),
+        });
+
         chrome.runtime.sendMessage({
           type: "LOG_PUSH",
           level: "info",
@@ -104,9 +152,14 @@ export default {
     let detachAuto = null;
     let detach = null;
 
+    // Anti-spam: log "no video yet" une seule fois
+    let warnedNoVideoYet = false;
+
     const attach = (v) => {
       if (!v || video) return;
       video = v;
+
+      api.log("Vidéo trouvée, attach autoMarker");
 
       chrome.runtime.sendMessage({
         type: "LOG_PUSH",
@@ -124,13 +177,20 @@ export default {
         } catch {}
         detachAuto = null;
         video = null;
+        api.log("Detach autoMarker vidéo");
       };
     };
 
     const tryAttach = () => {
       if (detach) return;
       const v = findVideo();
-      if (!v) return;
+      if (!v) {
+        if (!warnedNoVideoYet) {
+          warnedNoVideoYet = true;
+          api.log("Aucune vidéo détectée pour l'instant");
+        }
+        return;
+      }
       detach = attach(v);
     };
 
@@ -138,6 +198,8 @@ export default {
 
     const mo = new MutationObserver(tryAttach);
     mo.observe(document.documentElement, { childList: true, subtree: true });
+
+    api.log("MutationObserver attaché (player)");
 
     return () => {
       try {

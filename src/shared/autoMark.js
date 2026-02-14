@@ -1,28 +1,5 @@
 // src/shared/autoMark.js
 
-/**
- * Auto-mark basé sur "watch time réel" (anti-seek) + fin proche.
- * - Ne compte pas le temps si l'utilisateur saute (delta trop grand)
- * - Déclenche une seule fois par "episodeKey"
- */
-/** Prod cfg
- 
-    remainingThresholdSec: 30, // <= 30s restantes
-    endPercent: 0.85, // >= 95% de la durée
-    minWatchSecondsFloor: 60, // au moins 60s
-    minWatchPercent: 0.3, // ou 30% regardé
-    maxCountableDeltaSec: 1.25, // anti-seek: on compte max 1.25s par tick 
-    */
-
-/** debug cfg
- 
-    remainingThresholdSec: 30, // <= 30s restantes
-    endPercent: 0.05, // >= 95% de la durée
-    minWatchSecondsFloor: 60, // au moins 60s
-    minWatchPercent: 0.01, // ou 30% regardé
-    maxCountableDeltaSec: 1.25, // anti-seek: on compte max 1.25s par tick 
- */
-
 export function createAutoMarker({
   getEpisodeKey,
   onMarkWanted,
@@ -31,15 +8,16 @@ export function createAutoMarker({
   log = () => {},
 }) {
   const cfg = {
-    remainingThresholdSec: 30, // <= 30s restantes
-    endPercent: 0.85, // >= 95% de la durée
-    minWatchSecondsFloor: 60, // au moins 60s
-    minWatchPercent: 0.3, // ou 30% regardé
-    maxCountableDeltaSec: 1.25, // anti-seek: on compte max 1.25s par tick
+    remainingThresholdSec: 30,
+    endPercent: 0.85,
+    minWatchSecondsFloor: 60,
+    minWatchPercent: 0.3,
+    maxCountableDeltaSec: 1.25,
     ...config,
   };
 
-  /** @type {HTMLVideoElement|null} */
+  log("[autoMark] init", { config: cfg });
+
   let video = null;
 
   let lastT = null;
@@ -53,7 +31,7 @@ export function createAutoMarker({
     lastT = null;
     watched = 0;
     seeking = false;
-    log("[autoMark] reset episodeKey=", key);
+    log("[autoMark] reset episode", { episodeKey: key });
   }
 
   function shouldTrigger(duration, currentTime) {
@@ -71,12 +49,12 @@ export function createAutoMarker({
       currentTime / duration >= cfg.endPercent;
 
     if (okMin && okEnd) {
-      log("[autoMark] ✅ CONDITIONS VALIDÉES", {
+      log("[autoMark] conditions validées", {
         watchedSeconds: watched.toFixed(1),
-        watchedPercent: (watchedPercent * 100).toFixed(1) + "%",
-        remaining: remaining.toFixed(1) + "s",
-        currentTime: currentTime.toFixed(1) + "s",
-        duration: duration.toFixed(1) + "s",
+        watchedPercent: (watchedPercent * 100).toFixed(1),
+        remaining: remaining.toFixed(1),
+        currentTime: currentTime.toFixed(1),
+        duration: duration.toFixed(1),
       });
     }
 
@@ -90,59 +68,21 @@ export function createAutoMarker({
 
     const minWatchSeconds = Math.max(cfg.minWatchSecondsFloor, duration * 0.2);
 
-    const okRemaining = remaining <= cfg.remainingThresholdSec;
-    const okEndPercent = percent >= cfg.endPercent;
-    const okMinSeconds = watched >= minWatchSeconds;
-    const okMinPercent = watchedPercent >= cfg.minWatchPercent;
-
-    log("──────────── 📊 AUTO-MARK STATUS ────────────");
-    log(`Durée épisode: ${duration.toFixed(0)}s`);
-    log(
-      `Position actuelle: ${currentTime.toFixed(1)}s (${(percent * 100).toFixed(
-        1,
-      )}%)`,
-    );
-    log(
-      `Temps réellement regardé: ${watched.toFixed(1)}s (${(
-        watchedPercent * 100
-      ).toFixed(1)}%)`,
-    );
-
-    log(
-      `remainingThresholdSec → restant ${remaining.toFixed(
-        1,
-      )}s / seuil ${cfg.remainingThresholdSec}s → ${okRemaining ? "✅" : "❌"}`,
-    );
-
-    log(
-      `endPercent → ${(percent * 100).toFixed(
-        1,
-      )}% / requis ${(cfg.endPercent * 100).toFixed(0)}% → ${
-        okEndPercent ? "✅" : "❌"
-      }`,
-    );
-
-    log(
-      `minWatchSecondsFloor → ${watched.toFixed(
-        1,
-      )}s / requis ${minWatchSeconds.toFixed(1)}s → ${
-        okMinSeconds ? "✅" : "❌"
-      }`,
-    );
-
-    log(
-      `minWatchPercent → ${(watchedPercent * 100).toFixed(
-        1,
-      )}% / requis ${(cfg.minWatchPercent * 100).toFixed(0)}% → ${
-        okMinPercent ? "✅" : "❌"
-      }`,
-    );
-
-    log("─────────────────────────────────────────────");
+    log("[autoMark] status", {
+      duration: duration.toFixed(0),
+      currentTime: currentTime.toFixed(1),
+      percent: (percent * 100).toFixed(1),
+      watched: watched.toFixed(1),
+      watchedPercent: (watchedPercent * 100).toFixed(1),
+      remaining: remaining.toFixed(1),
+      okRemaining: remaining <= cfg.remainingThresholdSec,
+      okEndPercent: percent >= cfg.endPercent,
+      okMinSeconds: watched >= minWatchSeconds,
+      okMinPercent: watchedPercent >= cfg.minWatchPercent,
+    });
   }
 
   async function tick() {
-    // log("[autoMark] tick", { paused: video?.paused, t: video?.currentTime });
     try {
       if (!video) return;
 
@@ -159,16 +99,13 @@ export function createAutoMarker({
 
       if (!Number.isFinite(duration) || duration <= 0) return;
 
-      // 1) Incrément du "watch time réel"
       if (!video.paused && !seeking) {
         if (lastT != null) {
           const dt = t - lastT;
 
-          // anti-seek: si dt trop grand (jump), on ne compte pas
           if (dt > 0 && dt <= cfg.maxCountableDeltaSec) {
             watched += dt;
 
-            // 2) Report toutes les 15 secondes RÉELLES regardées
             if (watched - lastStatusReportAt >= 15) {
               lastStatusReportAt = watched;
               reportStatus(duration, t);
@@ -179,20 +116,23 @@ export function createAutoMarker({
 
       lastT = t;
 
-      // 3) Déclenchement
       if (shouldTrigger(duration, t)) {
         markedKey = key;
-        log("[autoMark] 🚀 MARQUAGE AUTO DÉCLENCHÉ", {
+
+        log("[autoMark] déclenchement", {
           episodeKey: key,
           watchedSeconds: watched.toFixed(1),
-          percent: ((t / duration) * 100).toFixed(1) + "%",
-          remaining: (duration - t).toFixed(1) + "s",
+          percent: ((t / duration) * 100).toFixed(1),
+          remaining: (duration - t).toFixed(1),
         });
 
         await onMarkWanted({ key, watchedSeconds: watched, duration, t });
       }
     } catch (e) {
-      log("[autoMark] tick error:", e?.message || e);
+      log("[autoMark] tick error", {
+        message: e?.message,
+        stack: e?.stack,
+      });
     }
   }
 
@@ -200,47 +140,58 @@ export function createAutoMarker({
     if (!v) return () => {};
     video = v;
 
+    log("[autoMark] attach video", {
+      duration: video?.duration ?? null,
+    });
+
     const onSeeking = () => {
       seeking = true;
-      log(
-        "[autoMark] ⏩ seeking",
-        `from=${lastT?.toFixed(1)}s to=${video.currentTime.toFixed(1)}s`,
-      );
+      log("[autoMark] seeking", {
+        from: lastT?.toFixed(1),
+        to: video.currentTime.toFixed(1),
+      });
     };
 
     const onSeeked = () => {
       seeking = false;
       lastT = video.currentTime;
-      log("[autoMark] ⏩ seeked at", `${video.currentTime.toFixed(1)}s`);
+      log("[autoMark] seeked", {
+        at: video.currentTime.toFixed(1),
+      });
     };
 
     const onPlay = () => {
       lastT = video.currentTime;
-      log("[autoMark] ▶️ play at", `${video.currentTime.toFixed(1)}s`);
+      log("[autoMark] play", {
+        at: video.currentTime.toFixed(1),
+      });
     };
 
     const onPause = () => {
-      log("[autoMark] ⏸ pause at", `${video.currentTime.toFixed(1)}s`);
+      log("[autoMark] pause", {
+        at: video.currentTime.toFixed(1),
+      });
     };
 
     v.addEventListener("seeking", onSeeking);
     v.addEventListener("seeked", onSeeked);
     v.addEventListener("play", onPlay);
-
     v.addEventListener("pause", onPause);
-    try {
-      v.removeEventListener("pause", onPause);
-    } catch {}
 
     const interval = setInterval(tick, 1000);
 
     return () => {
       clearInterval(interval);
+
       try {
         v.removeEventListener("seeking", onSeeking);
         v.removeEventListener("seeked", onSeeked);
         v.removeEventListener("play", onPlay);
+        v.removeEventListener("pause", onPause);
       } catch {}
+
+      log("[autoMark] detach video");
+
       video = null;
     };
   }

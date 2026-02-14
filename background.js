@@ -1,5 +1,10 @@
 // E:\Hyak-Tracker\background.js
 import { createHyakApi } from "./src/api/hyakanime/index.js";
+import { createLogger } from "./src/core/logger.js";
+
+const logger = createLogger({
+  scope: "background",
+});
 
 let cachedToken = null;
 
@@ -37,11 +42,13 @@ function getHostFromUrl(url) {
 }
 
 function purgeAllLogs() {
+  logger.info("Purge globale des logs (startup/install)");
   logsByTab.clear();
   topHostByTab.clear();
 }
 
 function purgeTabLogs(tabId) {
+  logger.debug("Purge logs onglet", { tabId });
   logsByTab.delete(tabId);
   topHostByTab.delete(tabId);
 }
@@ -117,9 +124,20 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   const prevTopHost = topHostByTab.get(tabId) || "";
   topHostByTab.set(tabId, nextTopHost);
 
+  logger.debug("Navigation détectée", {
+    tabId,
+    nextTopHost,
+    prevTopHost,
+  });
+
   if (prevTopHost && prevTopHost !== nextTopHost) {
     // purge complète de la session de logs de cet onglet
     logsByTab.set(tabId, { topHost: nextTopHost, logs: [] });
+    logger.info("Changement topHost → purge session logs", {
+      tabId,
+      from: prevTopHost,
+      to: nextTopHost,
+    });
   } else {
     // si bucket existe, on sync topHost
     const bucket = logsByTab.get(tabId);
@@ -242,6 +260,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // ----- STREAM CONTEXT -----
       if (msg?.type === "STREAM_UPDATE") {
         const tabId = sender?.tab?.id;
+        logger.debug("STREAM_UPDATE reçu", {
+          tabId,
+          title: msg.payload?.title,
+          episode: msg.payload?.episode,
+        });
         if (!tabId) {
           sendResponse({ ok: false, error: "NO_TAB" });
           return;
@@ -254,6 +277,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       if (msg?.type === "GET_STREAM_CONTEXT") {
         const tabId = sender?.tab?.id ?? msg?.tabId; // ✅ support popup
+        logger.debug("GET_STREAM_CONTEXT", { tabId });
         if (!tabId) {
           sendResponse({ ok: false, error: "NO_TAB" });
           return;
@@ -268,6 +292,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === "HYAKANIME_TOKEN") {
         cachedToken = msg.token;
         await chrome.storage.local.set({ hyakanimeToken: cachedToken });
+        logger.info("Token Hyakanime mis à jour");
         sendResponse({ ok: true });
         return;
       }
@@ -275,6 +300,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === "GET_TOKEN") {
         if (!cachedToken) {
           const s = await chrome.storage.local.get(["hyakanimeToken"]);
+          logger.debug("GET_TOKEN demandé");
           cachedToken = s.hyakanimeToken || null;
         }
         sendResponse({ token: cachedToken });
@@ -284,8 +310,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // ----- SEARCH -----
       if (msg?.type === "SEARCH_ANIME") {
         const q = msg.query || "";
+        logger.debug("SEARCH_ANIME", { query: q });
         const r = await hyakApi.search.anime(q); // wrapper
         sendResponse(r); // { ok, data } déjà normalisé
+        logger.info("SEARCH_ANIME résultat", {
+          ok: r.ok,
+          count: Array.isArray(r.data) ? r.data.length : 0,
+        });
         return;
       }
 
@@ -300,6 +331,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           !Number.isFinite(animeId)
         ) {
           sendResponse({ ok: false, error: "BAD_ARGS" });
+          logger.warn("WRITE_PROGRESSION BAD_ARGS", { animeId, wanted });
           return;
         }
 
@@ -307,11 +339,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!uid) {
           const s = await chrome.storage.local.get(["hyakanimeUid"]);
           uid = s.hyakanimeUid || null;
+          logger.warn("WRITE_PROGRESSION NO_UID");
         }
         if (!uid) {
           sendResponse({ ok: false, error: "NO_UID" });
           return;
         }
+
+        logger.info("WRITE_PROGRESSION demandé", {
+          animeId,
+          wanted,
+        });
 
         const r = await hyakApi.progression.writeSafe({
           uid,
@@ -331,8 +369,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             status: r.error?.status ?? 0,
             error: r.error,
           });
+          logger.error("WRITE_PROGRESSION échec", r.error);
           return;
         }
+
+        logger.info("WRITE_PROGRESSION succès", {
+          animeId,
+          progression: wanted,
+        });
 
         sendResponse({ ok: true, status: 200, data: r.data });
         return;
@@ -348,6 +392,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
+        logger.debug("GET_PROGRESSION_ANIME", { animeId });
         const r = await hyakApi.progression.detail({ uid, animeId });
 
         if (!r.ok) {
@@ -357,6 +402,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             data: null,
             error: r.error,
           });
+          logger.error("GET_PROGRESSION_ANIME échec", r.error);
           return;
         }
 
@@ -367,6 +413,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // ----- GLOBAL AUTOMARK COMMIT -----
       if (msg?.type === "AUTOMARK_COMMIT") {
         const tabId = sender?.tab?.id;
+        logger.info("AUTOMARK_COMMIT reçu", {
+          title: ctx?.title,
+          episode: msg.episode,
+        });
         if (!tabId) {
           sendResponse({ ok: false, error: "NO_TAB" });
           return;
@@ -443,6 +493,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         if (!Number.isFinite(animeId)) {
           sendResponse({ ok: false, error: "ANIME_NOT_FOUND" });
+          logger.warn("AUTOMARK anime introuvable", {
+            title: ctx.title,
+          });
           return;
         }
 
@@ -464,6 +517,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
 
           sendResponse({ ok: false, error: "WRITE_FAILED", details: wr.error });
+          logger.error("Automark write failed", wr.error);
           return;
         }
 
@@ -500,7 +554,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       sendResponse({ ok: false, error: "UNKNOWN_MESSAGE" });
     } catch (err) {
-      console.error("Background error:", err);
+      logger.error("Erreur interne background", {
+        message: err?.message,
+        stack: err?.stack,
+      });
       sendResponse({ ok: false, error: "INTERNAL_ERROR" });
     }
   })();
