@@ -1,6 +1,6 @@
 // src/modules/hyakanime/index.js
 
-function findAuthToken() {
+function findAuthToken(api) {
   const candidates = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -16,6 +16,11 @@ function findAuthToken() {
     if (looksJwt || looksLong) candidates.push({ key: k, value: v });
   }
 
+  api.log("localStorage scan terminé", {
+    totalKeys: localStorage.length,
+    candidates: candidates.length,
+  });
+
   candidates.sort((a, b) => {
     const score = (x) =>
       (/(token|auth|jwt|access)/i.test(x.key) ? 10 : 0) +
@@ -23,15 +28,26 @@ function findAuthToken() {
     return score(b) - score(a);
   });
 
-  return candidates[0]?.value || null;
+  const found = candidates[0]?.value || null;
+
+  if (found) {
+    api.log("Token candidat détecté (non exposé)", {
+      key: candidates[0]?.key,
+      length: found.length,
+    });
+  } else {
+    api.log("Aucun token détecté dans localStorage");
+  }
+
+  return found;
 }
 
 async function pushTokenIfAny(api) {
-  const token = findAuthToken();
+  const token = findAuthToken(api);
   if (!token) return false;
 
   await chrome.runtime.sendMessage({ type: "HYAKANIME_TOKEN", token });
-  api.log("token sent to background");
+  api.log("Token envoyé au background");
   return true;
 }
 
@@ -42,15 +58,23 @@ export default {
     api.log("hyakanime module attached");
 
     // 1) try once
+    api.log("Tentative initiale récupération token");
     pushTokenIfAny(api);
 
-    // 2) retry a bit (au cas où le site hydrate le storage après)
-    const t = setTimeout(() => pushTokenIfAny(api), 1500);
+    // 2) retry a bit
+    const t = setTimeout(() => {
+      api.log("Retry récupération token (1.5s)");
+      pushTokenIfAny(api);
+    }, 1500);
 
-    // 3) et observer les changements de localStorage via l’event storage
-    // (note: surtout utile si token est modifié/renouvelé)
-    const onStorage = () => pushTokenIfAny(api);
+    // 3) observer storage
+    const onStorage = () => {
+      api.log("Event storage détecté");
+      pushTokenIfAny(api);
+    };
+
     window.addEventListener("storage", onStorage);
+    api.log("Listener storage attaché");
 
     return () => {
       clearTimeout(t);
