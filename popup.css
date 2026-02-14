@@ -319,3 +319,141 @@ pre {
   text-decoration: underline;
   word-break: break-word;
 }
+
+/* =========================================================
+   RootView: rendre le banner plus compact (sans toucher aux autres vues)
+   - #banner est un sibling de #viewRoot, donc on cible via :has()
+   ========================================================= */
+
+body:has(#viewRoot:not(.hidden)) #banner {
+  min-height: unset; /* annule .banner min-height:120 */
+}
+
+body:has(#viewRoot:not(.hidden)) #banner .bannerRow {
+  min-height: unset; /* annule .bannerRow min-height:120 */
+  padding: 10px 12px; /* réduit l’air vertical */
+  align-items: center; /* au lieu de flex-start */
+  gap: 10px;
+}
+
+body:has(#viewRoot:not(.hidden)) #banner .poster {
+  width: 44px; /* plus compact */
+  height: 62px;
+  margin-top: 0;
+  border-radius: 10px;
+}
+
+body:has(#viewRoot:not(.hidden)) #banner .animeTitle {
+  margin-top: 2px;
+  font-size: 14px;
+  max-width: 280px;
+}
+
+body:has(#viewRoot:not(.hidden)) #banner .subtitle {
+  margin-top: 2px;
+  font-size: 11.5px;
+  max-width: 280px;
+}
+
+/* (optionnel) rendre la meta row un poil plus compacte */
+body:has(#viewRoot:not(.hidden)) #banner .bannerMetaRow {
+  padding: 8px 12px 0;
+}
+
+#viewRoot #banner {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* --- Calendrier (RootView) --- */
+#viewRoot .calendar-list {
+  margin-top: 0;
+  padding: 10px 10px 12px 10px;
+
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#viewRoot .calendar-list::-webkit-scrollbar {
+  width: 8px;
+}
+#viewRoot .calendar-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+#viewRoot .calendar-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#viewRoot .calendar-item {
+  padding: 10px 10px;
+  border-radius: 12px;
+
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+#viewRoot .calendar-item:hover {
+  transform: translateY(-1px);
+  background: rgba(0, 0, 0, 0.25);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.calendar-title {
+  font-weight: 600;
+  font-size: 13px;
+
+  /* Clamp 2 lignes (compatibilité moderne + webkit) */
+  display: -webkit-box;
+  display: box;
+  -webkit-box-orient: vertical;
+  box-orient: vertical;
+
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+
+  overflow: hidden;
+}
+
+#viewRoot .calendar-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  font-size: 11.5px;
+  color: var(--muted2);
+}
+
+#viewRoot .calendar-remaining {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* States */
+#viewRoot .calendar-loading,
+#viewRoot .calendar-empty,
+#viewRoot .calendar-error {
+  font-size: 12px;
+  color: var(--muted2);
+  padding: 8px 4px;
+}

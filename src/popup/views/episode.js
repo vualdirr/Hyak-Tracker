@@ -52,6 +52,7 @@ export async function renderEpisodeView(pctx) {
     booted = true;
     bindEpisodeInputListeners();
     bindSearchWriteListeners();
+    wireBannerClick();
   }
 
   // domain
@@ -626,6 +627,7 @@ async function upsertAnimeLink(title, season, animeId) {
 // -------------------- Anime selection + progression fetch --------------------
 async function selectAnime(anime) {
   selectedAnimeId = anime?.id ?? null;
+  wireBannerClick();
 
   try {
     const titleForKey = ($("title")?.value || "").trim();
@@ -805,6 +807,24 @@ function renderBanner({
   bannerBgEl.style.backgroundImage = bannerImg ? `url("${bannerImg}")` : "";
   posterEl.src = posterImg || "";
   posterEl.style.display = posterImg ? "block" : "none";
+}
+
+function wireBannerClick() {
+  const banner = document.getElementById("banner");
+  if (!banner) return;
+
+  if (!selectedAnimeId) {
+    banner.style.cursor = "";
+    banner.onclick = null;
+    return;
+  }
+
+  banner.style.cursor = "pointer";
+  banner.onclick = () => {
+    chrome.tabs.create({
+      url: `https://hyakanime.fr/anime/${selectedAnimeId}`,
+    });
+  };
 }
 
 // -------------------- Logs (global) --------------------
