@@ -60,15 +60,35 @@ export default {
         const ctx = cachedCtx;
 
         if (!ctx?.title || !ctx?.episode) {
-          api.log("❌ Aucun contexte streaming actif.");
+          chrome.runtime.sendMessage({
+            type: "LOG_PUSH",
+            level: "error",
+            kind: "step",
+            scope: "automark/player",
+            message: "❌ Automark: contexte streaming manquant",
+          });
           return;
         }
 
         const ep = Number.parseInt(ctx.episode, 10);
         if (!Number.isFinite(ep) || ep <= 0) {
-          api.log("❌ Episode invalide:", ctx.episode);
+          chrome.runtime.sendMessage({
+            type: "LOG_PUSH",
+            level: "error",
+            kind: "step",
+            scope: "automark/player",
+            message: `❌ Automark: épisode invalide (${ctx.episode})`,
+          });
           return;
         }
+
+        chrome.runtime.sendMessage({
+          type: "LOG_PUSH",
+          level: "info",
+          kind: "step",
+          scope: "automark/player",
+          message: `🚀 Automark déclenché (E${ep})`,
+        });
 
         await chrome.runtime.sendMessage({
           type: "AUTOMARK_COMMIT",
@@ -88,10 +108,12 @@ export default {
       if (!v || video) return;
       video = v;
 
-      api.log("🎥 video detected", {
-        paused: v.paused,
-        duration: v.duration,
-        currentTime: v.currentTime,
+      chrome.runtime.sendMessage({
+        type: "LOG_PUSH",
+        level: "info",
+        kind: "step",
+        scope: "playervideos/vidmoly",
+        message: "Player vidéo détecté (vidmoly)",
       });
 
       detachAuto = autoMarker.attach(v);

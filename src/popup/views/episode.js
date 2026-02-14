@@ -1,17 +1,13 @@
 // E:\Hyak-Tracker\src\popup\views\episode.js
 import { setView } from "./viewState.js";
-import {
-  getSettings,
-  updateSettings,
-  syncSettingsUI,
-  applyDebugVisibility,
-  applyDebugVisibilityFromSettings,
-} from "./settings.js";
+import { getSettings, applyDebugVisibilityFromSettings } from "./settings.js";
 import {
   getToken,
   getStreamContext,
   sendMessage,
 } from "../services/runtime.js";
+import { pushLog } from "../services/runtime.js";
+import { renderPopupLogs } from "./logs.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,6 +38,8 @@ const STORAGE_KEYS = {
 // -------------------- Public API --------------------
 export async function renderEpisodeView(pctx) {
   setView("episode");
+  activeTabId = pctx.tabId || null;
+  await refreshEpisodeLogsUI();
 
   // init settings UI (debug visibility)
   try {
@@ -78,7 +76,6 @@ export async function renderEpisodeView(pctx) {
     });
 
     updateWriteButtonState();
-    log("ℹ️ Contexte détecté (tab-scoped).");
   } else {
     // Pas de ctx => on reste en mode manuel, mais on garde la vue épisode
     renderBanner({
@@ -377,10 +374,6 @@ async function runHyakanimeSearch({ manual }) {
   const seasonHint = pageCtx?.season ? parseInt(pageCtx.season, 10) : null;
   const queries = buildSearchQueries(title, seasonHint);
 
-  log(
-    `Recherche Hyakanime${Number.isFinite(seasonHint) ? ` (hint saison=${seasonHint})` : ""}: ${queries.join(" | ")} …`,
-  );
-
   let allItems = [];
   const seen = new Set();
 
@@ -667,8 +660,6 @@ async function selectAnime(anime) {
     totalEpisodes: null,
   });
 
-  log(`✅ Sélectionné: id=${selectedAnimeId}`);
-
   if (!selectedAnimeId) return;
 
   if (!hykUid) {
@@ -702,11 +693,8 @@ async function selectAnime(anime) {
     updateWriteButtonState();
 
     const t = getDisplayTitleMedia(selectedAnimeMedia);
-    log(`🎴 Media+progression chargés: ${t}`);
-    if (Number.isFinite(knownProgression))
-      log(`📊 Progression Hyakanime: ${knownProgression}`);
-    if (Number.isFinite(knownTotalEpisodes))
-      log(`📺 Total épisodes: ${knownTotalEpisodes}`);
+    if (Number.isFinite(knownProgression));
+    if (Number.isFinite(knownTotalEpisodes));
   } catch (e) {
     log(`⚠️ Impossible de charger la progression: ${String(e?.message || e)}`);
   }
@@ -819,15 +807,48 @@ function renderBanner({
   posterEl.style.display = posterImg ? "block" : "none";
 }
 
-// -------------------- Logs --------------------
-function log(s) {
+// -------------------- Logs (global) --------------------
+let activeTabId = null;
+
+async function refreshEpisodeLogsUI() {
   const el = $("log");
   if (!el) return;
-  el.textContent = (String(s) + "\n\n" + el.textContent).slice(0, 4000);
+  if (!activeTabId) return;
+  await renderPopupLogs({ tabId: activeTabId, el });
 }
 
-function logSettings(s) {
+function log(message, data) {
+  // On envoie un STEP (milestone)
+  pushLog({
+    tabId: activeTabId,
+    level: "info",
+    kind: "step",
+    scope: "popup:episode",
+    message: String(message || ""),
+    data,
+  }).catch(() => {});
+
+  // refresh UI (best effort)
+  refreshEpisodeLogsUI().catch(() => {});
+}
+
+function logSettings(message, data) {
+  pushLog({
+    tabId: activeTabId,
+    level: "info",
+    kind: "step",
+    scope: "popup:settings",
+    message: String(message || ""),
+    data,
+  }).catch(() => {});
+
   const el = $("logSettings");
-  if (!el) return;
-  el.textContent = (String(s) + "\n\n" + el.textContent).slice(0, 4000);
+  if (el) {
+    // logSettings reste dans son <pre> uniquement si debug visible,
+    // mais on peut aussi l’afficher via store global plus tard.
+    el.textContent = (String(message || "") + "\n\n" + el.textContent).slice(
+      0,
+      2000,
+    );
+  }
 }

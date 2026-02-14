@@ -30,7 +30,17 @@ export default {
     const fire = debounce(async (meta) => {
       const ctx = extractAnimeSamaContext();
       await publish(ctx, meta);
-      api.log("ctx", ctx);
+
+      if (ctx?.title && ctx?.episode) {
+        api.log("CTX OK", ctx); // debug interne
+        await chrome.runtime.sendMessage({
+          type: "LOG_PUSH",
+          level: "info",
+          kind: "step",
+          scope: "streaming/anime-sama",
+          message: `Contexte détecté: ${ctx.title} E${ctx.episode}`,
+        });
+      }
     }, 150);
 
     // 1) First extract

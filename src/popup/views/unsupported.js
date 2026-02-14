@@ -2,20 +2,19 @@
 import { applyDebugVisibilityFromSettings } from "./settings.js";
 import { setView } from "./viewState.js";
 import { setBannerBasic } from "../components/banner.js";
+import { renderPopupLogs } from "./logs.js";
 
 const $ = (id) => document.getElementById(id);
 
 export async function renderUnsupportedView(pctx) {
   setView("unsupported");
 
-  // ✅ Bannière courte (commune)
   setBannerBasic({
     domain: pctx.hostname || "—",
     title: "Site non supporté",
     subtitle: "",
   });
 
-  // ✅ Message long uniquement sur cette vue
   const msg = $("unsupportedMessage");
   if (msg) {
     msg.innerHTML = `
@@ -35,5 +34,5 @@ export async function renderUnsupportedView(pctx) {
   await applyDebugVisibilityFromSettings();
 
   const el = $("logUnsupported");
-  if (el) el.textContent = `Unsupported view\nurl=${pctx.url}\n`;
+  await renderPopupLogs({ tabId: pctx.tabId, el });
 }

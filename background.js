@@ -1,3 +1,4 @@
+// E:\Hyak-Tracker\background.js
 import { createHyakApi } from "./src/api/hyakanime/index.js";
 
 let cachedToken = null;
@@ -15,6 +16,58 @@ self.hyakApi = hyakApi;
 
 // ---- STREAM CONTEXT CACHE (RAM only, scoped per tab) ----
 const streamSessions = new Map(); // tabId -> { ctx, ts }
+
+// ---- GLOBAL LOG STORE (RAM only, scoped per tab; session = TOP host only) ----
+// Objectif:
+// - stocker TOUS les logs (même debug OFF)
+// - merger streaming + player (iframes) dans la même session de l'onglet
+// - purge UNIQUEMENT quand le TOP hostname change (navigation onglet)
+// - purge au démarrage / install / fermeture onglet
+//
+// logsByTab : tabId -> { topHost: string, logs: LogEntry[] }
+const logsByTab = new Map();
+const topHostByTab = new Map(); // tabId -> hostname (TOP frame)
+
+function getHostFromUrl(url) {
+  try {
+    return new URL(url).hostname || "";
+  } catch {
+    return "";
+  }
+}
+
+function purgeAllLogs() {
+  logsByTab.clear();
+  topHostByTab.clear();
+}
+
+function purgeTabLogs(tabId) {
+  logsByTab.delete(tabId);
+  topHostByTab.delete(tabId);
+}
+
+function ensureTabBucket(tabId) {
+  const topHost = topHostByTab.get(tabId) || "";
+  const cur = logsByTab.get(tabId);
+
+  if (!cur) {
+    const bucket = { topHost, logs: [] };
+    logsByTab.set(tabId, bucket);
+    return bucket;
+  }
+
+  // Si topHost a été initialisé après, on sync
+  if (!cur.topHost && topHost) cur.topHost = topHost;
+
+  // IMPORTANT: on ne purge pas sur LOG_PUSH (iframes).
+  // La purge se fait uniquement sur tabs.onUpdated (TOP nav).
+  return cur;
+}
+
+function pushLog(tabId, entry) {
+  const bucket = ensureTabBucket(tabId);
+  bucket.logs.push(entry);
+}
 
 async function cleanupAnimeLinkMap() {
   const { animeLinkMap = {} } = await chrome.storage.local.get("animeLinkMap");
@@ -50,19 +103,142 @@ async function cleanupAnimeLinkMap() {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   streamSessions.delete(tabId);
+  purgeTabLogs(tabId);
+});
+
+// TOP navigation: purge si le hostname de l'onglet change.
+// (Les logs des iframes ne doivent jamais déclencher de purge.)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo?.url) return;
+
+  const nextTopHost = getHostFromUrl(changeInfo.url);
+  if (!nextTopHost) return;
+
+  const prevTopHost = topHostByTab.get(tabId) || "";
+  topHostByTab.set(tabId, nextTopHost);
+
+  if (prevTopHost && prevTopHost !== nextTopHost) {
+    // purge complète de la session de logs de cet onglet
+    logsByTab.set(tabId, { topHost: nextTopHost, logs: [] });
+  } else {
+    // si bucket existe, on sync topHost
+    const bucket = logsByTab.get(tabId);
+    if (bucket && !bucket.topHost) bucket.topHost = nextTopHost;
+    if (bucket && bucket.topHost !== nextTopHost) {
+      // cas rare: bucket topHost différent => on force cohérence
+      logsByTab.set(tabId, { topHost: nextTopHost, logs: [] });
+    }
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  purgeAllLogs();
   cleanupAnimeLinkMap().catch(() => {});
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  purgeAllLogs();
   cleanupAnimeLinkMap().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
+      // ----- LOGS (global, RAM only) -----
+      if (msg?.type === "LOG_PUSH") {
+        const tabId = sender?.tab?.id ?? msg?.tabId;
+        if (!tabId) {
+          sendResponse({ ok: false, error: "NO_TAB" });
+          return;
+        }
+
+        // originHost = host réel du contexte qui log (frame)
+        // compat: ancien champ siteKey/hostname
+        const originHost =
+          String(
+            msg?.originHost ??
+              msg?.siteKey ??
+              msg?.hostname ??
+              getHostFromUrl(msg?.url || "") ??
+              "",
+          ) || "";
+
+        const originUrl = String(msg?.originUrl ?? msg?.url ?? "") || "";
+
+        const level = String(msg?.level || "info");
+
+        // ⭐ NEW: kind = "log" | "step"
+        let kind = String(msg?.kind || "log");
+        if (kind !== "log" && kind !== "step") kind = "log";
+
+        const scope = String(msg?.scope || "app");
+        const message = String(msg?.message || "");
+        const data = msg?.data ?? undefined;
+
+        // topHost = host du TOP frame (onglet)
+        // sender.tab.url est disponible quand le message vient d'un content script,
+        // sinon (popup) on utilise topHostByTab.
+        const topHost =
+          getHostFromUrl(sender?.tab?.url || "") ||
+          topHostByTab.get(tabId) ||
+          "";
+
+        // on mémorise topHost si on le découvre
+        if (topHost && topHostByTab.get(tabId) !== topHost) {
+          topHostByTab.set(tabId, topHost);
+          const bucket = logsByTab.get(tabId);
+          if (bucket && bucket.topHost && bucket.topHost !== topHost) {
+            // si divergence, on aligne sur le topHost (sans purge ici)
+            bucket.topHost = topHost;
+          }
+        }
+
+        pushLog(tabId, {
+          ts: Date.now(),
+          level,
+          kind,
+          scope,
+          message,
+          data,
+          originHost,
+          originUrl,
+        });
+
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (msg?.type === "LOG_GET_CURRENT") {
+        const tabId = sender?.tab?.id ?? msg?.tabId;
+        if (!tabId) {
+          sendResponse({ ok: false, error: "NO_TAB" });
+          return;
+        }
+
+        const bucket = logsByTab.get(tabId) || null;
+        sendResponse({
+          ok: true,
+          // compat: on garde "siteKey" mais il représente le TOP host (site courant de l'onglet)
+          siteKey: bucket?.topHost || topHostByTab.get(tabId) || "",
+          logs: bucket?.logs || [],
+        });
+        return;
+      }
+
+      if (msg?.type === "LOG_CLEAR_CURRENT") {
+        const tabId = sender?.tab?.id ?? msg?.tabId;
+        if (!tabId) {
+          sendResponse({ ok: false, error: "NO_TAB" });
+          return;
+        }
+
+        // on garde topHost, mais on vide les logs
+        const topHost = topHostByTab.get(tabId) || "";
+        logsByTab.set(tabId, { topHost, logs: [] });
+        sendResponse({ ok: true });
+        return;
+      }
+
       // ----- STREAM CONTEXT -----
       if (msg?.type === "STREAM_UPDATE") {
         const tabId = sender?.tab?.id;
@@ -127,7 +303,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        // uid : comme avant (fallback storage)
         let uid = msg.uid;
         if (!uid) {
           const s = await chrome.storage.local.get(["hyakanimeUid"]);
@@ -150,7 +325,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           },
         });
 
-        // si tu veux garder ton ancien shape de réponse :
         if (!r.ok) {
           sendResponse({
             ok: false,
@@ -160,7 +334,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        // r.data peut être "skipped" ou une réponse API write
         sendResponse({ ok: true, status: 200, data: r.data });
         return;
       }
@@ -177,7 +350,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const r = await hyakApi.progression.detail({ uid, animeId });
 
-        // Compat { ok, status, data }
         if (!r.ok) {
           sendResponse({
             ok: false,
@@ -212,6 +384,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
+        pushLog(tabId, {
+          ts: Date.now(),
+          level: "info",
+          kind: "step",
+          scope: "automark/bg",
+          message: `📩 Automark commit reçu (E${ep})`,
+        });
+
         const { hyakanimeUid, animeLinkMap = {} } =
           await chrome.storage.local.get(["hyakanimeUid", "animeLinkMap"]);
 
@@ -220,7 +400,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        // --------- Helpers ---------
         function norm(s) {
           return (s || "")
             .toLowerCase()
@@ -241,11 +420,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let animeId = animeLinkMap?.[mapKey]?.animeId ?? null;
         animeId = Number.parseInt(animeId, 10);
 
-        // --------- AUTO RESOLVE IF MISSING (via wrapper) ---------
         if (!Number.isFinite(animeId)) {
           const q = `${ctx.title} saison ${season}`;
-
-          // Wrapper search => data normalisée: [{ id, displayTitle, titles, ... }]
           const sr = await hyakApi.search.anime(q);
 
           if (sr.ok && Array.isArray(sr.data) && sr.data.length > 0) {
@@ -270,7 +446,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        // --------- WRITE (anti-downgrade obligatoire via wrapper) ---------
         const wr = await hyakApi.progression.writeSafe({
           uid: hyakanimeUid,
           animeId,
@@ -278,19 +453,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           status: 1,
         });
 
-        // writeSafe peut répondre:
-        // - ok:true + data.skipped... (déjà à jour)
-        // - ok:true + data (réponse write)
-        // - ok:false + error
         if (!wr.ok) {
+          pushLog(tabId, {
+            ts: Date.now(),
+            level: "error",
+            kind: "step",
+            scope: "automark/bg",
+            message: "❌ Automark: write failed",
+            data: wr.error,
+          });
+
           sendResponse({ ok: false, error: "WRITE_FAILED", details: wr.error });
           return;
         }
 
+        if (wr.data?.skipped) {
+          pushLog(tabId, {
+            ts: Date.now(),
+            level: "info",
+            kind: "step",
+            scope: "automark/bg",
+            message: `🔒 Automark skip (déjà à ${wr.data?.known})`,
+          });
+        } else {
+          pushLog(tabId, {
+            ts: Date.now(),
+            level: "info",
+            kind: "step",
+            scope: "automark/bg",
+            message: `✅ Automark progression mise à jour → ${ep}`,
+          });
+        }
+
         await cleanupAnimeLinkMap();
 
-        // --------- Reply ---------
-        // On garde ton format de réponse + on ajoute info skipped si besoin
         sendResponse({
           ok: true,
           animeId,

@@ -8,7 +8,7 @@ Extension navigateur qui **détecte l’anime/saison/épisode** sur les sites de
 - ✅ Tracking vidéo : détection d’état (play/pause), progression, fin de vidéo (selon player)
 - ✅ Auto-marquage : envoie du “marquer comme vu” sur Hyakanime
 - ✅ Anti-downgrade : verrouille le bouton / auto-write si la progression Hyakanime est déjà >= épisode courant
-- ✅ Architecture modulaire : 1 module par site + (à terme) players réutilisables
+- ✅ Architecture modulaire : 1 module par site
 
 ---
 
@@ -33,9 +33,9 @@ Extension navigateur qui **détecte l’anime/saison/épisode** sur les sites de
 
 > Objectif : rendre les **players génériques** et réutilisables sur plusieurs sites (même player, plusieurs hosts).
 
-| Player          | Détection play/pause | Progression (timeupdate) | Détection fin (ended) | Robustesse (SPA / iframes) | Notes                                                             |
-| --------------- | -------------------: | -----------------------: | --------------------: | -------------------------: | ----------------------------------------------------------------- |
-| Vidmoly (embed) |              Partiel |                  Partiel |               Partiel |                    Partiel | Souvent en iframe → dépend de l’accessibilité DOM / même origine. |
+| Player          | Détection play/pause | Progression (timeupdate) | Détection fin (ended) | Robustesse (SPA / iframes) | Notes             |
+| --------------- | -------------------: | -----------------------: | --------------------: | -------------------------: | ----------------- |
+| Vidmoly (embed) |              Partiel |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 
 ---
 

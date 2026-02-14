@@ -1,4 +1,4 @@
-// content.js
+// E:\Hyak-Tracker\content.js
 (async () => {
   const hostname = location.hostname;
 
@@ -6,14 +6,26 @@
     chrome.runtime.getURL("src/core/registry.js")
   );
 
+  const { createLogger } = await import(
+    chrome.runtime.getURL("src/core/logger.js")
+  );
+
   const mod = findModule(hostname, location.href);
   if (!mod) return;
 
-  console.log("[HyakTracker] module matched:", mod.id);
+  const logger = createLogger({
+    scope: `content:${mod.id}`,
+    originHost: hostname,
+    originUrl: location.href,
+  });
+
+  logger.step(`Module détecté: ${mod.id}`);
 
   const detach = await mod.run({
-    log: (...a) => console.log(`[Hyak:${mod.id}]`, ...a),
+    log: (...a) => logger.debug("module log", { args: a }),
   });
+
+  logger.step(`Module initialisé: ${mod.id}`);
 
   window.addEventListener(
     "beforeunload",
