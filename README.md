@@ -16,16 +16,16 @@ Extension navigateur qui **détecte l’anime/saison/épisode** sur les sites de
 
 > Légende : **OK** = fonctionnel, **Partiel** = dépend du cas / player / SPA, **KO** = non implémenté ou non fiable.
 
-| Site             | Module                    | Extraction (titre/saison/ep) |    Tracking vidéo | Auto-marquage | Notes                                                                                           |
-| ---------------- | ------------------------- | ---------------------------: | ----------------: | ------------: | ----------------------------------------------------------------------------------------------- |
-| anime-sama       | `src/modules/anime-sama/` |                           OK | OK (selon player) |            OK | Base de référence, fonctionne actuellement.                                                     |
-| VoirAnime (v6)   | `src/modules/voiranime/`  |                           OK |         (à venir) |     (à venir) | Site parfois **SPA** : changement d’épisode sans reload → dépend de l’observation DOM + events. |
-| Netflix          | (à venir)                 |                    (à venir) |         (à venir) |     (à venir) | Non intégré.                                                                                    |
-| YouTube          | (à venir)                 |                    (à venir) |         (à venir) |     (à venir) | Non intégré.                                                                                    |
-| Prime Video      | (à venir)                 |                    (à venir) |         (à venir) |     (à venir) | Non intégré.                                                                                    |
-| Crunchyroll      | (à venir)                 |                    (à venir) |         (à venir) |     (à venir) | Non intégré.                                                                                    |
-| ADN              | (à venir)                 |                    (à venir) |         (à venir) |     (à venir) | Non intégré.                                                                                    |
-| Hyakanime (site) | `src/modules/hyakanime/`  |                          N/A |               N/A |           N/A | Sert uniquement à récupérer le token/uid & appeler l’API.                                       |
+| Site             | Module                    | Extraction (titre/saison/ep) | Tracking vidéo | Auto-marquage | Notes                                                                                           |
+| ---------------- | ------------------------- | ---------------------------: | -------------: | ------------: | ----------------------------------------------------------------------------------------------- |
+| anime-sama       | `src/modules/anime-sama/` |                           OK |             OK |            OK | Base de référence, fonctionne actuellement.                                                     |
+| VoirAnime (v6)   | `src/modules/voiranime/`  |                           OK |      (à venir) |     (à venir) | Site parfois **SPA** : changement d’épisode sans reload → dépend de l’observation DOM + events. |
+| Netflix          | (à venir)                 |                    (à venir) |      (à venir) |     (à venir) | Non intégré.                                                                                    |
+| YouTube          | (à venir)                 |                    (à venir) |      (à venir) |     (à venir) | Non intégré.                                                                                    |
+| Prime Video      | (à venir)                 |                    (à venir) |      (à venir) |     (à venir) | Non intégré.                                                                                    |
+| Crunchyroll      | (à venir)                 |                    (à venir) |      (à venir) |     (à venir) | Non intégré.                                                                                    |
+| ADN              | (à venir)                 |                    (à venir) |      (à venir) |     (à venir) | Non intégré.                                                                                    |
+| Hyakanime (site) | `src/modules/hyakanime/`  |                          N/A |            N/A |           N/A | Sert uniquement à récupérer le token/uid & appeler l’API.                                       |
 
 ---
 
@@ -39,6 +39,7 @@ Extension navigateur qui **détecte l’anime/saison/épisode** sur les sites de
 | smoothpre (embed) |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 | embed4me (embed)  |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 | sibnet (embed)    |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
+| sendvid (embed)   |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 
 ---
 

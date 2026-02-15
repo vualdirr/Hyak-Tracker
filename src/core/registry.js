@@ -164,6 +164,27 @@ export function findModule(hostname, url) {
     };
   }
 
+  if (hostname === "sendvid.com" || hostname.endsWith(".sendvid.com")) {
+    logger.info("Module matché", { id: "playervideos/sendvid" });
+
+    return {
+      id: "playervideos/sendvid",
+      run: async (api) => {
+        try {
+          const mod = await import(
+            chrome.runtime.getURL("src/modules/playervideos/sendvid/index.js")
+          );
+          return mod.default.run(api);
+        } catch (err) {
+          logger.error("Erreur import module sendvid", {
+            message: err?.message,
+          });
+          throw err;
+        }
+      },
+    };
+  }
+
   logger.debug("Aucun module trouvé pour hostname", { hostname });
 
   return null;
