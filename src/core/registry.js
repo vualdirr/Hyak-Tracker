@@ -121,7 +121,7 @@ export function findModule(hostname, url) {
 
   if (
     hostname === "lpayer.embed4me.com" ||
-    hostname.endsWith(".lpayer.embed4me.com/")
+    hostname.endsWith(".lpayer.embed4me.com")
   ) {
     logger.info("Module matché", { id: "playervideos/embed4me" });
 
@@ -135,6 +135,27 @@ export function findModule(hostname, url) {
           return mod.default.run(api);
         } catch (err) {
           logger.error("Erreur import module embed4me", {
+            message: err?.message,
+          });
+          throw err;
+        }
+      },
+    };
+  }
+
+  if (hostname === "video.sibnet.ru" || hostname.endsWith(".video.sibnet.ru")) {
+    logger.info("Module matché", { id: "playervideos/sibnet" });
+
+    return {
+      id: "playervideos/sibnet",
+      run: async (api) => {
+        try {
+          const mod = await import(
+            chrome.runtime.getURL("src/modules/playervideos/sibnet/index.js")
+          );
+          return mod.default.run(api);
+        } catch (err) {
+          logger.error("Erreur import module sibnet", {
             message: err?.message,
           });
           throw err;
