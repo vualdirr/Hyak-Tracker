@@ -35,8 +35,9 @@ Extension navigateur qui **détecte l’anime/saison/épisode** sur les sites de
 
 | Player            | Détection play/pause | Progression (timeupdate) | Détection fin (ended) | Robustesse (SPA / iframes) | Notes             |
 | ----------------- | -------------------: | -----------------------: | --------------------: | -------------------------: | ----------------- |
-| Vidmoly (embed)   |              Partiel |                  Partiel |               Partiel |                    Partiel | En phase de teste |
-| smoothpre (embed) |              Partiel |                  Partiel |               Partiel |                    Partiel | En phase de teste |
+| Vidmoly (embed)   |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
+| smoothpre (embed) |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
+| embed4me (embed)  |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 
 ---
 

@@ -20,7 +20,9 @@
     "https://vidmoly.biz/*",
     "https://*.vidmoly.biz/*",
     "https://*.smoothpre.com/*",
-    "https://smoothpre.com/*"
+    "https://smoothpre.com/*",
+    "https://lpayer.embed4me.com/*",
+    "https://*.embed4me.com/*"
   ],
   "content_scripts": [
     {
@@ -34,7 +36,9 @@
         "https://vidmoly.biz/*",
         "https://*.vidmoly.biz/*",
         "https://*.smoothpre.com/*",
-        "https://smoothpre.com/*"
+        "https://smoothpre.com/*",
+        "https://lpayer.embed4me.com/*",
+        "https://*.embed4me.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle",
@@ -58,7 +62,9 @@
         "https://vidmoly.biz/*",
         "https://*.vidmoly.biz/*",
         "https://*.smoothpre.com/*",
-        "https://smoothpre.com/*"
+        "https://smoothpre.com/*",
+        "https://lpayer.embed4me.com/*",
+        "https://*.embed4me.com/*"
       ]
     }
   ]
