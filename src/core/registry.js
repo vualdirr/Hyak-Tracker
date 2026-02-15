@@ -119,6 +119,30 @@ export function findModule(hostname, url) {
     };
   }
 
+  if (
+    hostname === "lpayer.embed4me.com" ||
+    hostname.endsWith(".lpayer.embed4me.com/")
+  ) {
+    logger.info("Module matché", { id: "playervideos/embed4me" });
+
+    return {
+      id: "playervideos/embed4me",
+      run: async (api) => {
+        try {
+          const mod = await import(
+            chrome.runtime.getURL("src/modules/playervideos/embed4me/index.js")
+          );
+          return mod.default.run(api);
+        } catch (err) {
+          logger.error("Erreur import module embed4me", {
+            message: err?.message,
+          });
+          throw err;
+        }
+      },
+    };
+  }
+
   logger.debug("Aucun module trouvé pour hostname", { hostname });
 
   return null;
