@@ -24,7 +24,9 @@
     "https://lpayer.embed4me.com/*",
     "https://*.embed4me.com/*",
     "https://video.sibnet.ru/*",
-    "https://*.sibnet.ru/*"
+    "https://*.sibnet.ru/*",
+    "https://sendvid.com/*",
+    "https://*.sendvid.com/*"
   ],
   "content_scripts": [
     {
@@ -42,7 +44,9 @@
         "https://lpayer.embed4me.com/*",
         "https://*.embed4me.com/*",
         "https://video.sibnet.ru/*",
-        "https://*.sibnet.ru/*"
+        "https://*.sibnet.ru/*",
+        "https://sendvid.com/*",
+        "https://*.sendvid.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle",
@@ -70,7 +74,9 @@
         "https://lpayer.embed4me.com/*",
         "https://*.embed4me.com/*",
         "https://video.sibnet.ru/*",
-        "https://*.sibnet.ru/*"
+        "https://*.sibnet.ru/*",
+        "https://sendvid.com/*",
+        "https://*.sendvid.com/*"
       ]
     }
   ]
