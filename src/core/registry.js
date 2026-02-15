@@ -98,6 +98,27 @@ export function findModule(hostname, url) {
     };
   }
 
+  if (hostname === "smoothpre.com" || hostname.endsWith(".smoothpre.com")) {
+    logger.info("Module matché", { id: "playervideos/smoothpre" });
+
+    return {
+      id: "playervideos/smoothpre",
+      run: async (api) => {
+        try {
+          const mod = await import(
+            chrome.runtime.getURL("src/modules/playervideos/smoothpre/index.js")
+          );
+          return mod.default.run(api);
+        } catch (err) {
+          logger.error("Erreur import module smoothpre", {
+            message: err?.message,
+          });
+          throw err;
+        }
+      },
+    };
+  }
+
   logger.debug("Aucun module trouvé pour hostname", { hostname });
 
   return null;
