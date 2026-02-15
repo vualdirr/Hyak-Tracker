@@ -18,7 +18,9 @@
     "https://voiranime.com/*",
     "https://*.voiranime.com/*",
     "https://vidmoly.biz/*",
-    "https://*.vidmoly.biz/*"
+    "https://*.vidmoly.biz/*",
+    "https://*.smoothpre.com/*",
+    "https://smoothpre.com/*"
   ],
   "content_scripts": [
     {
@@ -30,7 +32,9 @@
         "https://voiranime.com/*",
         "https://*.voiranime.com/*",
         "https://vidmoly.biz/*",
-        "https://*.vidmoly.biz/*"
+        "https://*.vidmoly.biz/*",
+        "https://*.smoothpre.com/*",
+        "https://smoothpre.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle",
@@ -52,7 +56,9 @@
         "https://voiranime.com/*",
         "https://*.voiranime.com/*",
         "https://vidmoly.biz/*",
-        "https://*.vidmoly.biz/*"
+        "https://*.vidmoly.biz/*",
+        "https://*.smoothpre.com/*",
+        "https://smoothpre.com/*"
       ]
     }
   ]

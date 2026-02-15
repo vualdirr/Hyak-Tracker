@@ -209,6 +209,10 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
+      // 🔎 Log léger (pas de spam): uniquement pour messages non-triviaux
+      // (Tu peux commenter si tu veux 0 bruit)
+      // logger.debug("onMessage", { type: msg?.type, from: sender?.url });
+
       // ----- LOGS (global, RAM only) -----
       if (msg?.type === "LOG_PUSH") {
         const tabId = sender?.tab?.id ?? msg?.tabId;
@@ -217,8 +221,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        // originHost = host réel du contexte qui log (frame)
-        // compat: ancien champ siteKey/hostname
         const originHost =
           String(
             msg?.originHost ??
@@ -229,10 +231,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ) || "";
 
         const originUrl = String(msg?.originUrl ?? msg?.url ?? "") || "";
-
         const level = String(msg?.level || "info");
 
-        // ⭐ NEW: kind = "log" | "step"
         let kind = String(msg?.kind || "log");
         if (kind !== "log" && kind !== "step") kind = "log";
 
@@ -240,20 +240,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const message = String(msg?.message || "");
         const data = msg?.data ?? undefined;
 
-        // topHost = host du TOP frame (onglet)
-        // sender.tab.url est disponible quand le message vient d'un content script,
-        // sinon (popup) on utilise topHostByTab.
         const topHost =
           getHostFromUrl(sender?.tab?.url || "") ||
           topHostByTab.get(tabId) ||
           "";
 
-        // on mémorise topHost si on le découvre
         if (topHost && topHostByTab.get(tabId) !== topHost) {
           topHostByTab.set(tabId, topHost);
           const bucket = logsByTab.get(tabId);
           if (bucket && bucket.topHost && bucket.topHost !== topHost) {
-            // si divergence, on aligne sur le topHost (sans purge ici)
             bucket.topHost = topHost;
           }
         }
@@ -283,7 +278,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const bucket = logsByTab.get(tabId) || null;
         sendResponse({
           ok: true,
-          // compat: on garde "siteKey" mais il représente le TOP host (site courant de l'onglet)
           siteKey: bucket?.topHost || topHostByTab.get(tabId) || "",
           logs: bucket?.logs || [],
         });
@@ -297,7 +291,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        // on garde topHost, mais on vide les logs
         const topHost = topHostByTab.get(tabId) || "";
         logsByTab.set(tabId, { topHost, logs: [] });
         sendResponse({ ok: true });
@@ -323,7 +316,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       if (msg?.type === "GET_STREAM_CONTEXT") {
-        const tabId = sender?.tab?.id ?? msg?.tabId; // ✅ support popup
+        const tabId = sender?.tab?.id ?? msg?.tabId;
         logger.debug("GET_STREAM_CONTEXT", { tabId });
         if (!tabId) {
           sendResponse({ ok: false, error: "NO_TAB" });
@@ -358,8 +351,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === "SEARCH_ANIME") {
         const q = msg.query || "";
         logger.debug("SEARCH_ANIME", { query: q });
-        const r = await hyakApi.search.anime(q); // wrapper
-        sendResponse(r); // { ok, data } déjà normalisé
+        const r = await hyakApi.search.anime(q);
+        sendResponse(r);
         logger.info("SEARCH_ANIME résultat", {
           ok: r.ok,
           count: Array.isArray(r.data) ? r.data.length : 0,
@@ -393,10 +386,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        logger.info("WRITE_PROGRESSION demandé", {
-          animeId,
-          wanted,
-        });
+        logger.info("WRITE_PROGRESSION demandé", { animeId, wanted });
 
         const r = await hyakApi.progression.writeSafe({
           uid,
@@ -424,7 +414,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           animeId,
           progression: wanted,
         });
-
         sendResponse({ ok: true, status: 200, data: r.data });
         return;
       }
@@ -460,24 +449,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // ----- GLOBAL AUTOMARK COMMIT -----
       if (msg?.type === "AUTOMARK_COMMIT") {
         const tabId = sender?.tab?.id;
-        logger.info("AUTOMARK_COMMIT reçu", {
-          title: ctx?.title,
-          episode: msg.episode,
-        });
         if (!tabId) {
           sendResponse({ ok: false, error: "NO_TAB" });
           return;
         }
 
-        const ctx = msg.ctx || streamSessions.get(tabId)?.ctx;
+        // ✅ FIX: ctx doit exister AVANT d'être loggué
+        const ctx = msg.ctx || streamSessions.get(tabId)?.ctx || null;
+
+        logger.info("AUTOMARK_COMMIT reçu", {
+          tabId,
+          hasCtx: !!ctx,
+          title: ctx?.title ?? null,
+          season: ctx?.season ?? null,
+          episode: msg?.episode ?? null,
+          senderUrl: sender?.url ?? null,
+        });
+
         if (!ctx?.title || !msg.episode) {
           sendResponse({ ok: false, error: "NO_CTX" });
+          logger.warn("AUTOMARK_COMMIT NO_CTX", { tabId, ctx });
           return;
         }
 
         const ep = Number.parseInt(msg.episode, 10);
         if (!Number.isFinite(ep) || ep <= 0) {
           sendResponse({ ok: false, error: "BAD_EPISODE" });
+          logger.warn("AUTOMARK_COMMIT BAD_EPISODE", {
+            tabId,
+            episode: msg.episode,
+          });
           return;
         }
 
@@ -494,6 +495,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         if (!hyakanimeUid) {
           sendResponse({ ok: false, error: "NO_UID" });
+          logger.warn("AUTOMARK_COMMIT NO_UID", { tabId });
           return;
         }
 
@@ -519,6 +521,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         if (!Number.isFinite(animeId)) {
           const q = `${ctx.title} saison ${season}`;
+          logger.info("AUTOMARK mapping manquant → SEARCH_ANIME", {
+            tabId,
+            q,
+            mapKey,
+          });
+
           const sr = await hyakApi.search.anime(q);
 
           if (sr.ok && Array.isArray(sr.data) && sr.data.length > 0) {
@@ -534,17 +542,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 auto: true,
               };
               await chrome.storage.local.set({ animeLinkMap });
+              logger.info("AUTOMARK mapping créé", { tabId, mapKey, animeId });
             }
+          } else {
+            logger.warn("AUTOMARK SEARCH_ANIME vide", {
+              tabId,
+              ok: sr.ok,
+              len: sr.data?.length ?? 0,
+            });
           }
         }
 
         if (!Number.isFinite(animeId)) {
           sendResponse({ ok: false, error: "ANIME_NOT_FOUND" });
           logger.warn("AUTOMARK anime introuvable", {
+            tabId,
             title: ctx.title,
+            season,
           });
           return;
         }
+
+        logger.info("AUTOMARK writeSafe", {
+          tabId,
+          uid: hyakanimeUid,
+          animeId,
+          ep,
+        });
 
         const wr = await hyakApi.progression.writeSafe({
           uid: hyakanimeUid,
@@ -596,6 +620,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           known: wr.data?.known ?? undefined,
           wanted: wr.data?.wanted ?? undefined,
         });
+        logger.info("AUTOMARK_COMMIT réponse envoyée", {
+          tabId,
+          ok: true,
+          animeId,
+          ep,
+        });
         return;
       }
 
@@ -611,7 +641,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         logger.debug("GET_USER_PROGRESSION_LIST", { uid });
 
-        // ✅ Vérifié dans ton wrapper: progression.listByUid(uid)
         const r = await hyakApi.progression.listByUid(uid);
 
         if (!r.ok) {

@@ -1,4 +1,10 @@
 // src/shared/autoMark.js
+//    remainingThresholdSec: 30,
+//    endPercent: 0.85,
+//    minWatchSecondsFloor: 60,
+//    minWatchPercent: 0.3,
+//    maxCountableDeltaSec: 1.25,
+//    ...config,
 
 export function createAutoMarker({
   getEpisodeKey,
@@ -9,9 +15,9 @@ export function createAutoMarker({
 }) {
   const cfg = {
     remainingThresholdSec: 30,
-    endPercent: 0.85,
-    minWatchSecondsFloor: 60,
-    minWatchPercent: 0.3,
+    endPercent: 0.25,
+    minWatchSecondsFloor: 5,
+    minWatchPercent: 0.05,
     maxCountableDeltaSec: 1.25,
     ...config,
   };
