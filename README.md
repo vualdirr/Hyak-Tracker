@@ -38,7 +38,8 @@ Extension navigateur qui **détecte l’anime/saison/épisode** sur les sites de
 | Vidmoly (embed)   |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 | smoothpre (embed) |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 | embed4me (embed)  |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
+| sibnet (embed)    |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
 
 ---
 
-By VualDirr
+Make by VualDirr

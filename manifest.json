@@ -22,7 +22,9 @@
     "https://*.smoothpre.com/*",
     "https://smoothpre.com/*",
     "https://lpayer.embed4me.com/*",
-    "https://*.embed4me.com/*"
+    "https://*.embed4me.com/*",
+    "https://video.sibnet.ru/*",
+    "https://*.sibnet.ru/*"
   ],
   "content_scripts": [
     {
@@ -38,7 +40,9 @@
         "https://*.smoothpre.com/*",
         "https://smoothpre.com/*",
         "https://lpayer.embed4me.com/*",
-        "https://*.embed4me.com/*"
+        "https://*.embed4me.com/*",
+        "https://video.sibnet.ru/*",
+        "https://*.sibnet.ru/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle",
@@ -64,7 +68,9 @@
         "https://*.smoothpre.com/*",
         "https://smoothpre.com/*",
         "https://lpayer.embed4me.com/*",
-        "https://*.embed4me.com/*"
+        "https://*.embed4me.com/*",
+        "https://video.sibnet.ru/*",
+        "https://*.sibnet.ru/*"
       ]
     }
   ]
