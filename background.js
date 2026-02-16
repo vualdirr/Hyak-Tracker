@@ -363,13 +363,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      if (msg?.type === "GET_TOKEN") {
+      // ----- SESSION HYAKANIME -----
+      if (msg?.type === "GET_SESSION") {
+        // 1) charger token depuis cache/storage
         if (!cachedToken) {
           const s = await chrome.storage.local.get(["hyakanimeToken"]);
-          logger.debug("GET_TOKEN demandé");
           cachedToken = s.hyakanimeToken || null;
         }
-        sendResponse({ token: cachedToken });
+
+        // 2) pas de token => pas de session
+        if (!cachedToken) {
+          sendResponse({
+            ok: true,
+            authenticated: false,
+            uid: null,
+          });
+          return;
+        }
+
+        // 3) token présent => decode JWT côté background
+        const payload = safeDecodeJwtPayload(cachedToken);
+        const uid = payload?.uid || payload?._id || payload?.sub || null;
+
+        // 4) si uid trouvé => on le persiste (utile pour d'autres flows)
+        if (uid) {
+          await chrome.storage.local.set({ hyakanimeUid: uid });
+        }
+
+        sendResponse({
+          ok: true,
+          authenticated: !!uid,
+          uid: uid || null,
+        });
         return;
       }
 
