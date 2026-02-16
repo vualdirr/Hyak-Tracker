@@ -32,6 +32,7 @@ const streamSessions = new Map(); // tabId -> { ctx, ts }
 // logsByTab : tabId -> { topHost: string, logs: LogEntry[] }
 const logsByTab = new Map();
 const topHostByTab = new Map(); // tabId -> hostname (TOP frame)
+const topUrlByTab = new Map(); // tabId -> url (TOP frame, sans hash)
 
 function getHostFromUrl(url) {
   try {
@@ -45,12 +46,14 @@ function purgeAllLogs() {
   logger.info("Purge globale des logs (startup/install)");
   logsByTab.clear();
   topHostByTab.clear();
+  topUrlByTab.clear();
 }
 
 function purgeTabLogs(tabId) {
   logger.debug("Purge logs onglet", { tabId });
   logsByTab.delete(tabId);
   topHostByTab.delete(tabId);
+  topUrlByTab.delete(tabId);
 }
 
 function ensureTabBucket(tabId) {
@@ -69,6 +72,16 @@ function ensureTabBucket(tabId) {
   // IMPORTANT: on ne purge pas sur LOG_PUSH (iframes).
   // La purge se fait uniquement sur tabs.onUpdated (TOP nav).
   return cur;
+}
+
+function normalizeTopUrl(url) {
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return "";
+  }
 }
 
 function pushLog(tabId, entry) {
@@ -118,34 +131,42 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!changeInfo?.url) return;
 
-  const nextTopHost = getHostFromUrl(changeInfo.url);
+  const nextTopUrl = normalizeTopUrl(changeInfo.url);
+  if (!nextTopUrl) return;
+
+  const nextTopHost = getHostFromUrl(nextTopUrl);
   if (!nextTopHost) return;
 
+  const prevTopUrl = topUrlByTab.get(tabId) || "";
   const prevTopHost = topHostByTab.get(tabId) || "";
+
+  topUrlByTab.set(tabId, nextTopUrl);
   topHostByTab.set(tabId, nextTopHost);
 
   logger.debug("Navigation détectée", {
     tabId,
     nextTopHost,
     prevTopHost,
+    nextTopUrl,
+    prevTopUrl,
   });
 
-  if (prevTopHost && prevTopHost !== nextTopHost) {
-    // purge complète de la session de logs de cet onglet
+  // ✅ Nouvelle règle: purge dès que l'URL TOP change (même host identique)
+  if (prevTopUrl && prevTopUrl !== nextTopUrl) {
     logsByTab.set(tabId, { topHost: nextTopHost, logs: [] });
-    logger.info("Changement topHost → purge session logs", {
+    logger.info("Changement topUrl → purge session logs", {
       tabId,
-      from: prevTopHost,
-      to: nextTopHost,
+      from: prevTopUrl,
+      to: nextTopUrl,
     });
-  } else {
-    // si bucket existe, on sync topHost
-    const bucket = logsByTab.get(tabId);
-    if (bucket && !bucket.topHost) bucket.topHost = nextTopHost;
-    if (bucket && bucket.topHost !== nextTopHost) {
-      // cas rare: bucket topHost différent => on force cohérence
-      logsByTab.set(tabId, { topHost: nextTopHost, logs: [] });
-    }
+    return;
+  }
+
+  // fallback cohérence bucket
+  const bucket = logsByTab.get(tabId);
+  if (bucket && !bucket.topHost) bucket.topHost = nextTopHost;
+  if (bucket && bucket.topHost !== nextTopHost) {
+    logsByTab.set(tabId, { topHost: nextTopHost, logs: [] });
   }
 });
 
@@ -251,6 +272,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (bucket && bucket.topHost && bucket.topHost !== topHost) {
             bucket.topHost = topHost;
           }
+        }
+
+        const topUrl = normalizeTopUrl(sender?.tab?.url || "");
+        if (topUrl && topUrlByTab.get(tabId) !== topUrl) {
+          topUrlByTab.set(tabId, topUrl);
         }
 
         pushLog(tabId, {

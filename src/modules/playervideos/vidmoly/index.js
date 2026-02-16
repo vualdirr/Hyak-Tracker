@@ -166,7 +166,7 @@ export default {
         level: "info",
         kind: "step",
         scope: "playervideos/vidmoly",
-        message: "Player vidéo détecté (vidmoly)",
+        message: "Vidéo détecté (vidmoly)",
       });
 
       detachAuto = autoMarker.attach(v);

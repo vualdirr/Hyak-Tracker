@@ -44,7 +44,7 @@
       originUrl: href,
     });
 
-    logger.step(`Module détecté: ${mod.id}`);
+    logger.step(`Module correspondant trouvé: ${mod.id}`);
     logger.info("Module sélectionné", {
       moduleId: mod.id,
     });
