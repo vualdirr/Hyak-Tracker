@@ -77,14 +77,6 @@ export default {
 
       if (ctx?.title && ctx?.episode) {
         api.log("CTX OK", ctx);
-
-        await chrome.runtime.sendMessage({
-          type: "LOG_PUSH",
-          level: "info",
-          kind: "step",
-          scope: "streaming/anime-sama",
-          message: `Contexte détecté: ${ctx.title} E${ctx.episode}`,
-        });
       } else {
         api.log("CTX incomplet", {
           title: ctx?.title ?? null,
