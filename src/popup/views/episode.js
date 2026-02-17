@@ -2,7 +2,7 @@
 import { setView } from "./viewState.js";
 import { getSettings, applyDebugVisibilityFromSettings } from "./settings.js";
 import {
-  getToken,
+  getSession,
   getStreamContext,
   sendMessage,
 } from "../services/runtime.js";
@@ -18,7 +18,6 @@ let selectedAnimeId = null;
 let currentDomain = null;
 let pageCtx = null;
 
-let hykToken = null;
 let hykUid = null;
 
 let selectedAnimeMedia = null; // media issu de /progression/anime/:uid/:id
@@ -91,8 +90,12 @@ export async function renderEpisodeView(pctx) {
     log("ℹ️ Contexte streaming non disponible (mode manuel).");
   }
 
-  // Token Hyakanime
-  await ensureTokenAndUid();
+  // Session Hyakanime (LOCK GLOBAL)
+  const sessionOk = await ensureSessionAndUidOrLockUI();
+  if (!sessionOk) {
+    // Pas de polling, pas de search auto, pas de progression.
+    return;
+  }
 
   // Si pas de pageCtx, on autorise la recherche manuelle
   pageCtx = pageCtx || ctx;
@@ -268,46 +271,48 @@ function bindSearchWriteListeners() {
   });
 }
 
-// -------------------- Token / UID --------------------
-async function ensureTokenAndUid() {
-  const t = await getToken();
+// -------------------- Session / UID (LOCK GLOBAL) --------------------
+async function ensureSessionAndUidOrLockUI() {
+  const session = await getSession();
 
-  if (!t?.token) {
+  if (!session?.ok || !session.authenticated || !session.uid) {
+    hykUid = null;
+
+    // Désactivation complète des actions
+    const btnSearch = $("btnSearch");
+    const btnWrite = $("btnWrite");
+
+    if (btnSearch) btnSearch.disabled = true;
+    if (btnWrite) btnWrite.disabled = true;
+
+    // Reset état progression
+    selectedAnimeId = null;
+    selectedAnimeMedia = null;
+    selectedAnimeProgressionRow = null;
+    knownProgression = null;
+    knownTotalEpisodes = null;
+
+    // Bannière explicite
+    renderBanner({
+      media: null,
+      titleFallback: "Connexion requise",
+      episode: "",
+      season: "",
+      currentProgression: null,
+      totalEpisodes: null,
+    });
+
     log(
-      "⚠️ Pas de token Hyakanime. Ouvre Hyakanime (connecté) dans un onglet puis réessaie.",
-    );
-    return;
-  }
-
-  hykToken = t.token;
-  const payload = safeDecodeJwtPayload(hykToken);
-  hykUid = payload?.uid || payload?._id || payload?.sub || null;
-
-  if (hykUid) {
-    await chrome.storage.local.set({ [STORAGE_KEYS.UID]: hykUid });
-    log("✅ Token Hyakanime détecté (uid OK).");
-  } else {
-    log("⚠️ Token détecté mais uid introuvable dans le payload (uid/_id/sub).");
-  }
-}
-
-function safeDecodeJwtPayload(token) {
-  try {
-    const part = String(token || "").split(".")[1];
-    if (!part) return null;
-
-    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(
-      atob(b64)
-        .split("")
-        .map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
-        .join(""),
+      "🔒 Hyakanime non connecté. Ouvre Hyakanime (connecté) dans un onglet puis ré-ouvre le popup.",
     );
 
-    return JSON.parse(json);
-  } catch {
-    return null;
+    return false;
   }
+
+  hykUid = session.uid;
+
+  log("✅ Session Hyakanime OK.");
+  return true;
 }
 
 // -------------------- UI / State --------------------
@@ -850,25 +855,4 @@ function log(message, data) {
 
   // refresh UI (best effort)
   refreshEpisodeLogsUI().catch(() => {});
-}
-
-function logSettings(message, data) {
-  pushLog({
-    tabId: activeTabId,
-    level: "info",
-    kind: "step",
-    scope: "popup:settings",
-    message: String(message || ""),
-    data,
-  }).catch(() => {});
-
-  const el = $("logSettings");
-  if (el) {
-    // logSettings reste dans son <pre> uniquement si debug visible,
-    // mais on peut aussi l’afficher via store global plus tard.
-    el.textContent = (String(message || "") + "\n\n" + el.textContent).slice(
-      0,
-      2000,
-    );
-  }
 }

@@ -16,8 +16,18 @@ export async function getStreamContext(tabId) {
   return res?.ok ? res.ctx || null : null;
 }
 
-export async function getToken() {
-  return await sendMessage({ type: "GET_TOKEN" });
+export async function getSession() {
+  const res = await sendMessage({ type: "GET_SESSION" });
+
+  if (!res?.ok) {
+    return { ok: false, authenticated: false, uid: null };
+  }
+
+  return {
+    ok: true,
+    authenticated: !!res.authenticated,
+    uid: res.uid || null,
+  };
 }
 
 // ----- LOGS (background store) -----

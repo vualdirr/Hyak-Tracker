@@ -215,6 +215,80 @@ async function ensureUidFromStoredToken() {
   });
 }
 
+async function writeProgressionCore({ uid, animeId, episode }) {
+  if (!uid) return { ok: false, error: "NO_UID" };
+  if (!Number.isFinite(animeId) || !Number.isFinite(episode) || episode <= 0) {
+    return { ok: false, error: "BAD_ARGS" };
+  }
+
+  // 1) Etat actuel normalisé
+  const current = await hyakApi.progression.detail({ uid, animeId });
+  if (!current.ok) return current;
+
+  const detail = current.data;
+
+  const totalEpisodes = detail?.media?.totalEpisodes ?? null;
+
+  const existingStatus = detail?.progress?.status ?? null; // 1..6
+  const existingStart = detail?.progress?.startDate ?? null;
+  const existingEnd = detail?.progress?.endDate ?? null;
+
+  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+
+  // 2) Status commun
+  // Rappel: 1=en cours, 2=à voir, 3=terminé, 4=en pause, 5=abandonné, 6=revisionnée
+  let status = existingStatus ?? 1;
+
+  const canDecideFinish = Number.isFinite(totalEpisodes) && totalEpisodes > 0;
+
+  const willFinish = canDecideFinish && episode >= totalEpisodes;
+
+  if (willFinish) {
+    status = 3; // ✅ Terminé
+  } else {
+    // ✅ Option A: si on regarde, on force "en cours" pour 2/4/5
+    // ❗ B: si status=6 (revisionnée), on ne touche pas
+    if (episode >= 1 && (status === 2 || status === 4 || status === 5)) {
+      status = 1;
+    }
+  }
+
+  // 3) Extra commun (types compatibles API)
+  // - lastChange: number (ms)
+  // - startDate/endDate: ISO string
+  const extra = {
+    lastChange: nowMs,
+  };
+
+  if (!existingStart && episode >= 1) {
+    extra.startDate = nowIso;
+  }
+
+  if (status === 3 && !existingEnd) {
+    extra.endDate = nowIso;
+  }
+
+  // 4) writeSafe (anti-downgrade déjà géré côté API)
+  const r = await hyakApi.progression.writeSafe({
+    uid,
+    animeId,
+    episode,
+    status,
+    extra,
+  });
+
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.error?.status ?? 0,
+      error: r.error,
+    };
+  }
+
+  return { ok: true, data: r.data };
+}
+
 chrome.runtime.onStartup.addListener(() => {
   purgeAllLogs();
   cleanupAnimeLinkMap().catch(() => {});
@@ -359,17 +433,61 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         cachedToken = msg.token;
         await chrome.storage.local.set({ hyakanimeToken: cachedToken });
         logger.info("Token Hyakanime mis à jour");
+
+        // ✅ IMPORTANT: dériver l'UID immédiatement (automark n'attend pas l'ouverture du popup)
+        try {
+          const payload = safeDecodeJwtPayload(cachedToken);
+          const uid = payload?.uid || payload?._id || payload?.sub || null;
+
+          if (uid) {
+            const s = await chrome.storage.local.get(["hyakanimeUid"]);
+            if (s.hyakanimeUid !== uid) {
+              await chrome.storage.local.set({ hyakanimeUid: uid });
+              logger.info("UID Hyakanime mis à jour depuis token", { uid });
+            }
+          }
+        } catch (e) {
+          logger.warn("Impossible de dériver UID depuis token", {
+            message: e?.message,
+          });
+        }
+
         sendResponse({ ok: true });
         return;
       }
 
-      if (msg?.type === "GET_TOKEN") {
+      // ----- SESSION HYAKANIME -----
+      if (msg?.type === "GET_SESSION") {
+        // 1) charger token depuis cache/storage
         if (!cachedToken) {
           const s = await chrome.storage.local.get(["hyakanimeToken"]);
-          logger.debug("GET_TOKEN demandé");
           cachedToken = s.hyakanimeToken || null;
         }
-        sendResponse({ token: cachedToken });
+
+        // 2) pas de token => pas de session
+        if (!cachedToken) {
+          sendResponse({
+            ok: true,
+            authenticated: false,
+            uid: null,
+          });
+          return;
+        }
+
+        // 3) token présent => decode JWT côté background
+        const payload = safeDecodeJwtPayload(cachedToken);
+        const uid = payload?.uid || payload?._id || payload?.sub || null;
+
+        // 4) si uid trouvé => on le persiste (utile pour d'autres flows)
+        if (uid) {
+          await chrome.storage.local.set({ hyakanimeUid: uid });
+        }
+
+        sendResponse({
+          ok: true,
+          authenticated: !!uid,
+          uid: uid || null,
+        });
         return;
       }
 
@@ -391,48 +509,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const wanted = Number.parseInt(msg.progression, 10);
         const animeId = Number.parseInt(msg.animeID ?? msg.id, 10);
 
-        if (
-          !Number.isFinite(wanted) ||
-          wanted <= 0 ||
-          !Number.isFinite(animeId)
-        ) {
-          sendResponse({ ok: false, error: "BAD_ARGS" });
-          logger.warn("WRITE_PROGRESSION BAD_ARGS", { animeId, wanted });
-          return;
-        }
-
         let uid = msg.uid;
         if (!uid) {
           const s = await chrome.storage.local.get(["hyakanimeUid"]);
           uid = s.hyakanimeUid || null;
-          logger.warn("WRITE_PROGRESSION NO_UID");
-        }
-        if (!uid) {
-          sendResponse({ ok: false, error: "NO_UID" });
-          return;
         }
 
         logger.info("WRITE_PROGRESSION demandé", { animeId, wanted });
 
-        const r = await hyakApi.progression.writeSafe({
+        const result = await writeProgressionCore({
           uid,
           animeId,
           episode: wanted,
-          status: msg.status ?? 1,
-          extra: {
-            lastChange: msg.lastChange ?? undefined,
-            startDate: msg.startDate ?? undefined,
-            endDate: msg.endDate ?? undefined,
-          },
         });
 
-        if (!r.ok) {
-          sendResponse({
-            ok: false,
-            status: r.error?.status ?? 0,
-            error: r.error,
-          });
-          logger.error("WRITE_PROGRESSION échec", r.error);
+        if (!result.ok) {
+          logger.error("WRITE_PROGRESSION échec", result.error);
+          sendResponse(result);
           return;
         }
 
@@ -440,7 +533,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           animeId,
           progression: wanted,
         });
-        sendResponse({ ok: true, status: 200, data: r.data });
+
+        sendResponse({ ok: true, status: 200, data: result.data });
         return;
       }
 
@@ -589,42 +683,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        logger.info("AUTOMARK writeSafe", {
+        logger.info("AUTOMARK write via core", {
           tabId,
           uid: hyakanimeUid,
           animeId,
           ep,
         });
 
-        const wr = await hyakApi.progression.writeSafe({
+        const result = await writeProgressionCore({
           uid: hyakanimeUid,
           animeId,
           episode: ep,
-          status: 1,
         });
 
-        if (!wr.ok) {
+        if (!result.ok) {
           pushLog(tabId, {
             ts: Date.now(),
             level: "error",
             kind: "step",
             scope: "automark/bg",
             message: "❌ Automark: write failed",
-            data: wr.error,
+            data: result.error,
           });
 
-          sendResponse({ ok: false, error: "WRITE_FAILED", details: wr.error });
-          logger.error("Automark write failed", wr.error);
+          sendResponse({
+            ok: false,
+            error: "WRITE_FAILED",
+            details: result.error,
+          });
           return;
         }
 
-        if (wr.data?.skipped) {
+        const wrData = result.data;
+
+        if (wrData?.skipped) {
           pushLog(tabId, {
             ts: Date.now(),
             level: "info",
             kind: "step",
             scope: "automark/bg",
-            message: `🔒 Automark skip (déjà à ${wr.data?.known})`,
+            message: `🔒 Automark skip (déjà à ${wrData?.known})`,
           });
         } else {
           pushLog(tabId, {
@@ -642,9 +740,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ok: true,
           animeId,
           progression: ep,
-          skipped: wr.data?.skipped ?? undefined,
-          known: wr.data?.known ?? undefined,
-          wanted: wr.data?.wanted ?? undefined,
+          skipped: wrData?.skipped ?? undefined,
+          known: wrData?.known ?? undefined,
+          wanted: wrData?.wanted ?? undefined,
         });
         logger.info("AUTOMARK_COMMIT réponse envoyée", {
           tabId,
