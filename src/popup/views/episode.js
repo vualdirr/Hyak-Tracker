@@ -856,24 +856,3 @@ function log(message, data) {
   // refresh UI (best effort)
   refreshEpisodeLogsUI().catch(() => {});
 }
-
-function logSettings(message, data) {
-  pushLog({
-    tabId: activeTabId,
-    level: "info",
-    kind: "step",
-    scope: "popup:settings",
-    message: String(message || ""),
-    data,
-  }).catch(() => {});
-
-  const el = $("logSettings");
-  if (el) {
-    // logSettings reste dans son <pre> uniquement si debug visible,
-    // mais on peut aussi l’afficher via store global plus tard.
-    el.textContent = (String(message || "") + "\n\n" + el.textContent).slice(
-      0,
-      2000,
-    );
-  }
-}
