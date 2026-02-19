@@ -29,18 +29,4 @@ Extension navigateur qui **détecte l’anime/saison/épisode** sur les sites de
 
 ---
 
-## Players vidéo supportés
-
-> Objectif : rendre les **players génériques** et réutilisables sur plusieurs sites (même player, plusieurs hosts).
-
-| Player            | Détection play/pause | Progression (timeupdate) | Détection fin (ended) | Robustesse (SPA / iframes) | Notes             |
-| ----------------- | -------------------: | -----------------------: | --------------------: | -------------------------: | ----------------- |
-| Vidmoly (embed)   |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
-| smoothpre (embed) |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
-| embed4me (embed)  |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
-| sibnet (embed)    |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
-| sendvid (embed)   |                   ok |                  Partiel |               Partiel |                    Partiel | En phase de teste |
-
----
-
 Make by VualDirr

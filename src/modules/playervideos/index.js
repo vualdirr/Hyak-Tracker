@@ -1,6 +1,7 @@
-// src/modules/playervideos/sendvid/index.js
-import { createAutoMarker } from "../../../shared/autoMark.js";
-import { norm } from "../../../shared/player/norm.js";
+// src/modules/playervideos/index.js
+import { createAutoMarker } from "../../shared/autoMark.js";
+import { norm } from "../../shared/player/norm.js";
+import { findProviderByHostname } from "./providers.config.js";
 
 function makeAnimeKey(title, season) {
   const s = Number.isFinite(season) && season > 0 ? season : 1;
@@ -11,8 +12,10 @@ function isDurationReady(v) {
   return Number.isFinite(v?.duration) && v.duration > 0;
 }
 
-async function waitLoadedMetadata(v, timeoutMs = 8000) {
+async function waitLoadedMetadata(v, timeoutMs) {
+  const ms = Number.isFinite(timeoutMs) ? timeoutMs : 0;
   if (!v) return false;
+  if (ms <= 0) return isDurationReady(v);
   if (isDurationReady(v)) return true;
 
   return await new Promise((resolve) => {
@@ -43,33 +46,41 @@ async function waitLoadedMetadata(v, timeoutMs = 8000) {
       v.addEventListener("durationchange", onReady, { once: true });
     } catch {}
 
-    const tid = setTimeout(onTimeout, timeoutMs);
+    const tid = setTimeout(onTimeout, ms);
   });
 }
 
 export default {
-  id: "playervideos/sendvid",
+  id: "playervideos/generic",
 
   match(hostname) {
-    // Sendvid utilise souvent des sous-domaines type videos2.sendvid.com
-    return hostname === "sendvid.com" || hostname.endsWith(".sendvid.com");
+    return !!findProviderByHostname(hostname);
   },
 
   async run(api) {
-    api.log("sendvid (player) module attached");
+    const provider = findProviderByHostname(location.hostname);
+
+    if (!provider) {
+      api.log("playervideos/generic: provider introuvable", {
+        hostname: location.hostname,
+      });
+      return () => {};
+    }
+
+    api.log("playervideos/generic attached", {
+      providerId: provider.id,
+      hostname: location.hostname,
+    });
 
     function findVideo() {
-      // ton extrait montre id="video-js-video_html5_api" + class="vjs-tech"
-      // on préfère un sélecteur robuste
-      return (
-        document.querySelector("video.vjs-tech#video-js-video_html5_api") ||
-        document.querySelector("video.vjs-tech") ||
-        document.querySelector("video")
-      );
+      for (const sel of provider.videoSelectors || []) {
+        const el = document.querySelector(sel);
+        if (el) return el;
+      }
+      return null;
     }
 
     async function getAutoEnabled() {
-      // ⚠️ appelé très souvent par autoMark -> NE PAS logger ici
       const s = await chrome.storage.local.get("autoMarkEnabled");
       return s.autoMarkEnabled ?? false;
     }
@@ -129,12 +140,11 @@ export default {
 
     const autoMarker = createAutoMarker({
       getEpisodeKey: () => {
-        // ⚠️ appelé très souvent -> NE PAS logger ici
         if (cachedCtx?.title && cachedCtx?.episode) {
           const s = cachedCtx.season ?? 1;
           return `${norm(cachedCtx.title)}|s${s}|e${cachedCtx.episode}`;
         }
-        return "sendvid:" + (document.referrer || location.href);
+        return `${provider.id}:` + (document.referrer || location.href);
       },
 
       getEnabled: async () => await getAutoEnabled(),
@@ -166,6 +176,7 @@ export default {
         }
 
         api.log("Automark commit demandé", {
+          providerId: provider.id,
           title: ctx.title,
           season: ctx.season ?? 1,
           episode: ep,
@@ -176,7 +187,7 @@ export default {
           type: "LOG_PUSH",
           level: "info",
           kind: "step",
-          scope: "playervideos/sendvid",
+          scope: provider.scope,
           message: "🚀 Automark déclenché",
         });
 
@@ -193,27 +204,28 @@ export default {
     let video = null;
     let detachAuto = null;
     let detach = null;
-
     let warnedNoVideoYet = false;
 
     const attach = async (v) => {
       if (!v || video) return;
       video = v;
 
-      const ready = await waitLoadedMetadata(v, 8000);
+      const ready = await waitLoadedMetadata(v, provider.waitMetadataMs ?? 0);
 
       api.log("Vidéo trouvée, attach autoMarker", {
+        providerId: provider.id,
         duration: isDurationReady(v) ? v.duration : null,
         durationReady: ready,
         src: v.currentSrc || v.getAttribute("src") || null,
+        readyState: v.readyState ?? null,
       });
 
       chrome.runtime.sendMessage({
         type: "LOG_PUSH",
         level: "info",
         kind: "step",
-        scope: "playervideos/sendvid",
-        message: "Player vidéo détecté (sendvid)",
+        scope: provider.scope,
+        message: `Player vidéo détecté (${provider.id})`,
       });
 
       detachAuto = autoMarker.attach(v);
@@ -224,7 +236,7 @@ export default {
         } catch {}
         detachAuto = null;
         video = null;
-        api.log("Detach autoMarker vidéo");
+        api.log("Detach autoMarker vidéo", { providerId: provider.id });
       };
     };
 
@@ -235,7 +247,9 @@ export default {
       if (!v) {
         if (!warnedNoVideoYet) {
           warnedNoVideoYet = true;
-          api.log("Aucune vidéo détectée pour l'instant");
+          api.log("Aucune vidéo détectée pour l'instant", {
+            providerId: provider.id,
+          });
         }
         return;
       }
@@ -243,16 +257,14 @@ export default {
       detach = await attach(v);
     };
 
-    // tentative immédiate
     await tryAttach();
 
-    // observe DOM (player injecté tard / remplacé)
     const mo = new MutationObserver(() => {
       tryAttach();
     });
     mo.observe(document.documentElement, { childList: true, subtree: true });
 
-    api.log("MutationObserver attaché (player)");
+    api.log("MutationObserver attaché (player)", { providerId: provider.id });
 
     return () => {
       try {
@@ -264,7 +276,7 @@ export default {
       try {
         if (ctxPollTimer) clearInterval(ctxPollTimer);
       } catch {}
-      api.log("sendvid (player) module detached");
+      api.log("playervideos/generic detached", { providerId: provider.id });
     };
   },
 };
