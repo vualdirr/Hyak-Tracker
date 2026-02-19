@@ -1,4 +1,4 @@
-// E:\Hyak-Tracker\src\core\registry.js
+// src/core/registry.js
 
 import { createLogger } from "./logger.js";
 
@@ -76,20 +76,22 @@ export function findModule(hostname, url) {
     };
   }
 
-  // --- Player videos domains ---
-  if (hostname === "vidmoly.biz" || hostname.endsWith(".vidmoly.biz")) {
-    logger.info("Module matché", { id: "playervideos/vidmoly" });
+  // --- Player videos domains (generic) ---
+  // On délègue le match au module générique (qui s'appuie sur providers.config).
+  // Ça évite d'avoir 1 bloc if par provider.
+  {
+    logger.info("Module matché", { id: "playervideos/generic" });
 
     return {
-      id: "playervideos/vidmoly",
+      id: "playervideos/generic",
       run: async (api) => {
         try {
           const mod = await import(
-            chrome.runtime.getURL("src/modules/playervideos/vidmoly/index.js")
+            chrome.runtime.getURL("src/modules/playervideos/index.js")
           );
           return mod.default.run(api);
         } catch (err) {
-          logger.error("Erreur import module vidmoly", {
+          logger.error("Erreur import module playervideos/generic", {
             message: err?.message,
           });
           throw err;
@@ -98,94 +100,7 @@ export function findModule(hostname, url) {
     };
   }
 
-  if (hostname === "smoothpre.com" || hostname.endsWith(".smoothpre.com")) {
-    logger.info("Module matché", { id: "playervideos/smoothpre" });
-
-    return {
-      id: "playervideos/smoothpre",
-      run: async (api) => {
-        try {
-          const mod = await import(
-            chrome.runtime.getURL("src/modules/playervideos/smoothpre/index.js")
-          );
-          return mod.default.run(api);
-        } catch (err) {
-          logger.error("Erreur import module smoothpre", {
-            message: err?.message,
-          });
-          throw err;
-        }
-      },
-    };
-  }
-
-  if (
-    hostname === "lpayer.embed4me.com" ||
-    hostname.endsWith(".lpayer.embed4me.com")
-  ) {
-    logger.info("Module matché", { id: "playervideos/embed4me" });
-
-    return {
-      id: "playervideos/embed4me",
-      run: async (api) => {
-        try {
-          const mod = await import(
-            chrome.runtime.getURL("src/modules/playervideos/embed4me/index.js")
-          );
-          return mod.default.run(api);
-        } catch (err) {
-          logger.error("Erreur import module embed4me", {
-            message: err?.message,
-          });
-          throw err;
-        }
-      },
-    };
-  }
-
-  if (hostname === "video.sibnet.ru" || hostname.endsWith(".video.sibnet.ru")) {
-    logger.info("Module matché", { id: "playervideos/sibnet" });
-
-    return {
-      id: "playervideos/sibnet",
-      run: async (api) => {
-        try {
-          const mod = await import(
-            chrome.runtime.getURL("src/modules/playervideos/sibnet/index.js")
-          );
-          return mod.default.run(api);
-        } catch (err) {
-          logger.error("Erreur import module sibnet", {
-            message: err?.message,
-          });
-          throw err;
-        }
-      },
-    };
-  }
-
-  if (hostname === "sendvid.com" || hostname.endsWith(".sendvid.com")) {
-    logger.info("Module matché", { id: "playervideos/sendvid" });
-
-    return {
-      id: "playervideos/sendvid",
-      run: async (api) => {
-        try {
-          const mod = await import(
-            chrome.runtime.getURL("src/modules/playervideos/sendvid/index.js")
-          );
-          return mod.default.run(api);
-        } catch (err) {
-          logger.error("Erreur import module sendvid", {
-            message: err?.message,
-          });
-          throw err;
-        }
-      },
-    };
-  }
-
-  logger.debug("Aucun module trouvé pour hostname", { hostname });
-
-  return null;
+  // (Note) si tu veux absolument éviter de charger le generic sur tous les hosts,
+  // il faudrait ajouter un garde-fou ici avec une liste de hosts.
+  // Mais avec ton manifest actuel, le content script ne tourne déjà que sur les hosts autorisés. :contentReference[oaicite:7]{index=7}
 }
