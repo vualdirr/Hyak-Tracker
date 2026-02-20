@@ -227,6 +227,9 @@ async function writeProgressionCore({ uid, animeId, episode }) {
 
   const detail = current.data;
 
+  // ✅ épisode AVANT write (source de vérité pour l'historique)
+  const oldEpisode = detail?.progress?.currentEpisode ?? null;
+
   const totalEpisodes = detail?.media?.totalEpisodes ?? null;
 
   const existingStatus = detail?.progress?.status ?? null; // 1..6
@@ -237,29 +240,20 @@ async function writeProgressionCore({ uid, animeId, episode }) {
   const nowMs = Date.now();
 
   // 2) Status commun
-  // Rappel: 1=en cours, 2=à voir, 3=terminé, 4=en pause, 5=abandonné, 6=revisionnée
   let status = existingStatus ?? 1;
-
   const canDecideFinish = Number.isFinite(totalEpisodes) && totalEpisodes > 0;
-
   const willFinish = canDecideFinish && episode >= totalEpisodes;
 
   if (willFinish) {
-    status = 3; // ✅ Terminé
+    status = 3;
   } else {
-    // ✅ Option A: si on regarde, on force "en cours" pour 2/4/5
-    // ❗ B: si status=6 (revisionnée), on ne touche pas
     if (episode >= 1 && (status === 2 || status === 4 || status === 5)) {
       status = 1;
     }
   }
 
-  // 3) Extra commun (types compatibles API)
-  // - lastChange: number (ms)
-  // - startDate/endDate: ISO string
-  const extra = {
-    lastChange: nowMs,
-  };
+  // 3) Extra commun
+  const extra = { lastChange: nowMs };
 
   if (!existingStart && episode >= 1) {
     extra.startDate = nowIso;
@@ -269,7 +263,7 @@ async function writeProgressionCore({ uid, animeId, episode }) {
     extra.endDate = nowIso;
   }
 
-  // 4) writeSafe (anti-downgrade déjà géré côté API)
+  // 4) writeSafe
   const r = await hyakApi.progression.writeSafe({
     uid,
     animeId,
@@ -286,7 +280,13 @@ async function writeProgressionCore({ uid, animeId, episode }) {
     };
   }
 
-  return { ok: true, data: r.data };
+  return {
+    ok: true,
+    data: r.data,
+    meta: {
+      oldEpisode, // ✅ utilisé pour l'historique
+    },
+  };
 }
 
 chrome.runtime.onStartup.addListener(() => {
@@ -300,6 +300,109 @@ chrome.runtime.onInstalled.addListener(() => {
   cleanupAnimeLinkMap().catch(() => {});
   ensureUidFromStoredToken().catch(() => {});
 });
+
+// ---- AUTOMARK HISTORY (persistent, circular max 10) ----
+
+const HISTORY_KEY = "autoMarkHistory";
+const HISTORY_LIMIT = 10;
+
+async function getHistory() {
+  const s = await chrome.storage.local.get([HISTORY_KEY]);
+  return Array.isArray(s[HISTORY_KEY]) ? s[HISTORY_KEY] : [];
+}
+
+async function pushHistory(entry) {
+  const history = await getHistory();
+
+  const head = history[0] || null;
+
+  // déduplication simple
+  if (
+    head &&
+    head.animeId === entry.animeId &&
+    head.newEpisode === entry.newEpisode
+  ) {
+    return;
+  }
+
+  history.unshift({
+    date: entry.date,
+    animeId: entry.animeId,
+    oldEpisode: entry.oldEpisode ?? null,
+    newEpisode: entry.newEpisode,
+  });
+
+  if (history.length > HISTORY_LIMIT) {
+    history.length = HISTORY_LIMIT;
+  }
+
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
+}
+
+async function writeProgressionDowngrade({ uid, animeId, episode }) {
+  if (!uid) return { ok: false, error: "NO_UID" };
+  if (!Number.isFinite(animeId)) return { ok: false, error: "BAD_ARGS" };
+  if (!Number.isFinite(episode) || episode <= 0) {
+    return { ok: false, error: "BAD_EPISODE" };
+  }
+
+  // 1) Lire l’état actuel pour récupérer status/dates
+  const current = await hyakApi.progression.detail({ uid, animeId });
+  if (!current.ok) return current;
+
+  const detail = current.data;
+
+  const totalEpisodes = detail?.media?.totalEpisodes ?? null;
+
+  const existingStatus = detail?.progress?.status ?? 1;
+  const existingStart = detail?.progress?.startDate ?? null;
+  const existingEnd = detail?.progress?.endDate ?? null;
+
+  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+
+  // 2) Recalculer un status cohérent avec l’épisode visé
+  let status = existingStatus;
+
+  const canDecideFinish = Number.isFinite(totalEpisodes) && totalEpisodes > 0;
+  const willFinish = canDecideFinish && episode >= totalEpisodes;
+
+  if (willFinish) {
+    status = 3; // terminé
+  } else {
+    // si on “dé-finish” un animé
+    if (status === 3) status = 1;
+
+    // si status était "à voir / pause / abandonné", revenir "en cours" dès qu’on a une progression
+    if (episode >= 1 && (status === 2 || status === 4 || status === 5)) {
+      status = 1;
+    }
+  }
+
+  // 3) Extra: lastChange obligatoire + dates cohérentes
+  const extra = { lastChange: nowMs };
+
+  // startDate: garder l’existant si présent, sinon en poser un
+  if (existingStart) {
+    extra.startDate = existingStart;
+  } else if (episode >= 1) {
+    extra.startDate = nowIso;
+  }
+
+  // endDate: uniquement si status=3, sinon ne PAS l’envoyer (évite incohérences)
+  if (status === 3) {
+    extra.endDate = existingEnd || nowIso;
+  }
+
+  // 4) Écriture unsafe (downgrade autorisé)
+  return hyakApi.progression.writeUnsafe({
+    uid,
+    animeId,
+    episode,
+    status,
+    extra,
+  });
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
@@ -716,13 +819,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const wrData = result.data;
 
-        if (wrData?.skipped) {
-          pushLog(tabId, {
-            ts: Date.now(),
-            level: "info",
-            kind: "step",
-            scope: "automark/bg",
-            message: `🔒 Automark skip (déjà à ${wrData?.known})`,
+        if (!wrData?.skipped) {
+          await pushHistory({
+            date: Date.now(),
+            animeId,
+            oldEpisode: result?.meta?.oldEpisode ?? null,
+            newEpisode: ep,
           });
         } else {
           pushLog(tabId, {
@@ -782,6 +884,98 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
 
         sendResponse({ ok: true, uid, data: r.data });
+        return;
+      }
+
+      // ----- HISTORY GET -----
+      if (msg?.type === "HISTORY_GET") {
+        const history = await getHistory();
+        sendResponse({ ok: true, history });
+        return;
+      }
+
+      // ----- HISTORY UNDO BY INDEX -----
+      if (msg?.type === "HISTORY_UNDO_INDEX") {
+        const index = Number(msg?.index);
+
+        const history = await getHistory();
+        if (!history.length) {
+          sendResponse({ ok: false, error: "EMPTY_HISTORY" });
+          return;
+        }
+
+        if (!Number.isFinite(index) || index < 0 || index >= history.length) {
+          sendResponse({ ok: false, error: "BAD_INDEX" });
+          return;
+        }
+
+        const entry = history[index];
+        const animeId = Number.parseInt(entry?.animeId, 10);
+
+        if (!Number.isFinite(animeId)) {
+          sendResponse({ ok: false, error: "BAD_ANIME_ID" });
+          return;
+        }
+
+        // 🔒 sécurité: on n'autorise l'undo que sur la première occurrence (la + récente) de cet animeId
+        const newestIndexForAnime = history.findIndex(
+          (x) => Number.parseInt(x?.animeId, 10) === animeId,
+        );
+
+        if (newestIndexForAnime !== index) {
+          sendResponse({ ok: false, error: "NOT_NEWEST_FOR_ANIME" });
+          return;
+        }
+
+        const { hyakanimeUid } = await chrome.storage.local.get([
+          "hyakanimeUid",
+        ]);
+        if (!hyakanimeUid) {
+          sendResponse({ ok: false, error: "NO_UID" });
+          return;
+        }
+
+        // 🔒 garde cohérence : la progression actuelle de CET animé doit matcher newEpisode
+        const current = await hyakApi.progression.detail({
+          uid: hyakanimeUid,
+          animeId,
+        });
+
+        if (!current.ok) {
+          sendResponse(current);
+          return;
+        }
+
+        const currentEp = current.data?.progress?.currentEpisode ?? null;
+        if (currentEp !== entry.newEpisode) {
+          sendResponse({ ok: false, error: "STATE_MISMATCH" });
+          return;
+        }
+
+        // ✅ appliquer undo
+        const oldEp = entry.oldEpisode;
+
+        let actionResult;
+        if (oldEp == null) {
+          actionResult = await hyakApi.progression.delete({ animeId });
+        } else {
+          actionResult = await writeProgressionDowngrade({
+            uid: hyakanimeUid,
+            animeId,
+            episode: Number(oldEp),
+          });
+        }
+
+        if (!actionResult?.ok) {
+          sendResponse(actionResult);
+          return;
+        }
+
+        // ✅ retirer uniquement cette entrée de l'historique
+        history.splice(index, 1);
+        await chrome.storage.local.set({ [HISTORY_KEY]: history });
+
+        sendResponse({ ok: true });
         return;
       }
 

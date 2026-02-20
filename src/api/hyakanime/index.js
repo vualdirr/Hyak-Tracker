@@ -1,4 +1,4 @@
-// src/api/hyakanime/index.js
+// E:\Hyak-Tracker\src\api\hyakanime\index.js
 import { createHyakanimeClient } from "./client.js";
 
 export function createHyakApi({
@@ -58,6 +58,39 @@ export function createHyakApi({
             status,
             ...extra,
           },
+        });
+      },
+
+      /**
+       * writeUnsafe = write direct (downgrade possible)
+       * ⚠️ À utiliser uniquement pour la feature Undo (historique)
+       */
+      writeUnsafe: async ({ uid, animeId, episode, status, extra = {} }) => {
+        // note: uid n'est pas dans le body de l'endpoint, il est porté par le token
+        return client.requestByKey("progression_write", {
+          __allowUnsafe: true,
+          body: {
+            id: animeId,
+            animeID: animeId,
+            progression: episode,
+            ...(status != null ? { status } : {}),
+            ...extra,
+          },
+        });
+      },
+
+      delete: async ({ animeId }) => {
+        const id = Number.parseInt(animeId, 10);
+        if (!Number.isFinite(id)) {
+          return {
+            ok: false,
+            error: { code: "BAD_ARGS", status: 0, message: "animeId invalid" },
+          };
+        }
+
+        // ✅ Payload réel confirmé : { id: 4694 }
+        return client.requestByKey("progression_delete", {
+          body: { id },
         });
       },
     },

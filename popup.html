@@ -30,17 +30,23 @@
     <!-- ROOT VIEW (racine site streaming) -->
     <div id="viewRoot" class="hidden">
       <div id="calendarList" class="calendar-list"></div>
-      <button id="btnSettingsRoot" title="Ouvrir les paramètres">
-        ⚙️ Paramètres
-      </button>
+      <div class="dualButtons">
+        <button id="btnHistoryRoot">🕘 Historique</button>
+        <button id="btnSettingsRoot" title="Ouvrir les paramètres">
+          ⚙️ Paramètres
+        </button>
+      </div>
       <pre id="logRoot" class="hidden"></pre>
     </div>
 
     <!-- UNSUPPORTED VIEW -->
     <div id="viewUnsupported" class="hidden">
-      <button id="btnSettingsUnsupported" title="Ouvrir les paramètres">
-        ⚙️ Paramètres
-      </button>
+      <div class="dualButtons">
+        <button id="btnHistoryRoot">🕘 Historique</button>
+        <button id="btnSettingsRoot" title="Ouvrir les paramètres">
+          ⚙️ Paramètres
+        </button>
+      </div>
 
       <div id="unsupportedMessage" class="unsupportedMessage"></div>
 
@@ -61,14 +67,29 @@
 
       <button id="btnSearch" class="hidden">Trouver sur Hyakanime</button>
 
-      <button id="btnSettings" title="Ouvrir les paramètres">
-        ⚙️ Paramètres
-      </button>
+      <div class="dualButtons">
+        <button id="btnHistory">🕘 Historique</button>
+        <button id="btnSettings" title="Ouvrir les paramètres">
+          ⚙️ Paramètres
+        </button>
+      </div>
 
       <button id="btnWrite" disabled>Marquer “vu”</button>
 
       <div id="choices"></div>
       <pre id="log" class="hidden"></pre>
+    </div>
+
+    <!-- HISTORY VIEW -->
+    <div id="viewHistory" class="hidden">
+      <div class="settingsHeader">
+        <button id="btnBackHistory" class="iconBtn" title="Retour">←</button>
+        <div class="settingsTitle">Historique</div>
+      </div>
+
+      <div id="historyList" class="historyList"></div>
+
+      <pre id="logHistory" class="hidden"></pre>
     </div>
 
     <!-- SETTINGS VIEW -->
