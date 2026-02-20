@@ -227,6 +227,9 @@ async function writeProgressionCore({ uid, animeId, episode }) {
 
   const detail = current.data;
 
+  // ✅ épisode AVANT write (source de vérité pour l'historique)
+  const oldEpisode = detail?.progress?.currentEpisode ?? null;
+
   const totalEpisodes = detail?.media?.totalEpisodes ?? null;
 
   const existingStatus = detail?.progress?.status ?? null; // 1..6
@@ -237,29 +240,20 @@ async function writeProgressionCore({ uid, animeId, episode }) {
   const nowMs = Date.now();
 
   // 2) Status commun
-  // Rappel: 1=en cours, 2=à voir, 3=terminé, 4=en pause, 5=abandonné, 6=revisionnée
   let status = existingStatus ?? 1;
-
   const canDecideFinish = Number.isFinite(totalEpisodes) && totalEpisodes > 0;
-
   const willFinish = canDecideFinish && episode >= totalEpisodes;
 
   if (willFinish) {
-    status = 3; // ✅ Terminé
+    status = 3;
   } else {
-    // ✅ Option A: si on regarde, on force "en cours" pour 2/4/5
-    // ❗ B: si status=6 (revisionnée), on ne touche pas
     if (episode >= 1 && (status === 2 || status === 4 || status === 5)) {
       status = 1;
     }
   }
 
-  // 3) Extra commun (types compatibles API)
-  // - lastChange: number (ms)
-  // - startDate/endDate: ISO string
-  const extra = {
-    lastChange: nowMs,
-  };
+  // 3) Extra commun
+  const extra = { lastChange: nowMs };
 
   if (!existingStart && episode >= 1) {
     extra.startDate = nowIso;
@@ -269,7 +263,7 @@ async function writeProgressionCore({ uid, animeId, episode }) {
     extra.endDate = nowIso;
   }
 
-  // 4) writeSafe (anti-downgrade déjà géré côté API)
+  // 4) writeSafe
   const r = await hyakApi.progression.writeSafe({
     uid,
     animeId,
@@ -286,7 +280,13 @@ async function writeProgressionCore({ uid, animeId, episode }) {
     };
   }
 
-  return { ok: true, data: r.data };
+  return {
+    ok: true,
+    data: r.data,
+    meta: {
+      oldEpisode, // ✅ utilisé pour l'historique
+    },
+  };
 }
 
 chrome.runtime.onStartup.addListener(() => {
@@ -300,6 +300,315 @@ chrome.runtime.onInstalled.addListener(() => {
   cleanupAnimeLinkMap().catch(() => {});
   ensureUidFromStoredToken().catch(() => {});
 });
+
+// ---- AUTOMARK HISTORY (persistent, circular max 10) ----
+
+const HISTORY_KEY = "autoMarkHistory";
+const HISTORY_LIMIT = 10;
+
+async function getHistory() {
+  const s = await chrome.storage.local.get([HISTORY_KEY]);
+  return Array.isArray(s[HISTORY_KEY]) ? s[HISTORY_KEY] : [];
+}
+
+async function pushHistory(entry) {
+  const history = await getHistory();
+
+  const head = history[0] || null;
+
+  // déduplication simple
+  if (
+    head &&
+    head.animeId === entry.animeId &&
+    head.newEpisode === entry.newEpisode
+  ) {
+    return;
+  }
+
+  history.unshift({
+    date: entry.date,
+    animeId: entry.animeId,
+    oldEpisode: entry.oldEpisode ?? null,
+    newEpisode: entry.newEpisode,
+  });
+
+  if (history.length > HISTORY_LIMIT) {
+    history.length = HISTORY_LIMIT;
+  }
+
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
+}
+
+async function writeProgressionDowngrade({ uid, animeId, episode }) {
+  if (!uid) return { ok: false, error: "NO_UID" };
+  if (!Number.isFinite(animeId)) return { ok: false, error: "BAD_ARGS" };
+  if (!Number.isFinite(episode) || episode <= 0) {
+    return { ok: false, error: "BAD_EPISODE" };
+  }
+
+  // 1) Lire l’état actuel pour récupérer status/dates
+  const current = await hyakApi.progression.detail({ uid, animeId });
+  if (!current.ok) return current;
+
+  const detail = current.data;
+
+  const totalEpisodes = detail?.media?.totalEpisodes ?? null;
+
+  const existingStatus = detail?.progress?.status ?? 1;
+  const existingStart = detail?.progress?.startDate ?? null;
+  const existingEnd = detail?.progress?.endDate ?? null;
+
+  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+
+  // 2) Recalculer un status cohérent avec l’épisode visé
+  let status = existingStatus;
+
+  const canDecideFinish = Number.isFinite(totalEpisodes) && totalEpisodes > 0;
+  const willFinish = canDecideFinish && episode >= totalEpisodes;
+
+  if (willFinish) {
+    status = 3; // terminé
+  } else {
+    // si on “dé-finish” un animé
+    if (status === 3) status = 1;
+
+    // si status était "à voir / pause / abandonné", revenir "en cours" dès qu’on a une progression
+    if (episode >= 1 && (status === 2 || status === 4 || status === 5)) {
+      status = 1;
+    }
+  }
+
+  // 3) Extra: lastChange obligatoire + dates cohérentes
+  const extra = { lastChange: nowMs };
+
+  // startDate: garder l’existant si présent, sinon en poser un
+  if (existingStart) {
+    extra.startDate = existingStart;
+  } else if (episode >= 1) {
+    extra.startDate = nowIso;
+  }
+
+  // endDate: uniquement si status=3, sinon ne PAS l’envoyer (évite incohérences)
+  if (status === 3) {
+    extra.endDate = existingEnd || nowIso;
+  }
+
+  // 4) Écriture unsafe (downgrade autorisé)
+  return hyakApi.progression.writeUnsafe({
+    uid,
+    animeId,
+    episode,
+    status,
+    extra,
+  });
+}
+
+// -------------------- RESOLVE_ANIME (source de vérité popup + automark) --------------------
+
+function normTitle(s) {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[\[\(].*?[\]\)]/g, " ")
+    .replace(/(vostfr|vf|multi|hd|1080p|720p|x264|x265|web|bluray)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function buildSearchQueries(title, seasonHint) {
+  const q = String(title || "").trim();
+  const n = parseInt(seasonHint, 10);
+
+  if (!Number.isFinite(n) || n <= 1) return [q];
+  return [`${q} saison ${n}`, `${q} season ${n}`, `${q} s${n}`, q];
+}
+
+function getAllTitles(anime) {
+  const arr = [];
+
+  if (anime?.displayTitle) arr.push(anime.displayTitle);
+
+  const t = anime?.titles;
+  if (t?.fr) arr.push(t.fr);
+  if (t?.en) arr.push(t.en);
+  if (t?.jp) arr.push(t.jp);
+  if (t?.romaji) arr.push(t.romaji);
+
+  if (anime?.title) arr.push(anime.title);
+  if (anime?.titleEN) arr.push(anime.titleEN);
+  if (anime?.titleJP) arr.push(anime.titleJP);
+  if (anime?.romanji) arr.push(anime.romanji);
+  if (Array.isArray(anime?.alt)) arr.push(...anime.alt);
+
+  return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))];
+}
+
+function similarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+
+  const A = new Set(a.split(" ").filter(Boolean));
+  const B = new Set(b.split(" ").filter(Boolean));
+  const inter = [...A].filter((x) => B.has(x)).length;
+  const union = new Set([...A, ...B]).size;
+  const jacc = union ? inter / union : 0;
+
+  let i = 0;
+  for (; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) break;
+  const prefix = i / Math.max(a.length, b.length);
+
+  return Math.max(jacc, prefix * 0.85);
+}
+
+function levenshtein(a, b) {
+  const m = a.length,
+    n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+      prev = temp;
+    }
+  }
+  return dp[n];
+}
+
+function editSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const d = levenshtein(a, b);
+  const maxLen = Math.max(a.length, b.length);
+  return maxLen ? 1 - d / maxLen : 0;
+}
+
+function rankItems(items, query) {
+  const q = normTitle(query);
+
+  const ranked = items.map((it) => {
+    const titles = getAllTitles(it)
+      .map((raw) => ({ raw, n: normTitle(raw) }))
+      .filter((x) => x.n);
+
+    for (const t of titles) {
+      if (t.n === q) {
+        return { it, score: 1.0, matchedOn: t.raw, perfect: true };
+      }
+    }
+
+    let best = 0;
+    let matchedOn = null;
+
+    for (const t of titles) {
+      if (t.n.includes(q) || q.includes(t.n)) {
+        if (0.95 > best) {
+          best = 0.95;
+          matchedOn = t.raw;
+        }
+        continue;
+      }
+
+      const s1 = similarity(q, t.n);
+      const s2 = editSimilarity(q, t.n);
+      const s = Math.max(s1, s2);
+
+      if (s > best) {
+        best = s;
+        matchedOn = t.raw;
+      }
+    }
+
+    const quasiPerfect = best >= 0.92;
+    return { it, score: best, matchedOn, perfect: quasiPerfect };
+  });
+
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked;
+}
+
+async function resolveAnimeCore({ title, seasonHint, limit = 6 }) {
+  const queries = buildSearchQueries(title, seasonHint);
+
+  let allItems = [];
+  const seen = new Set();
+  const tried = [];
+
+  for (const q of queries) {
+    const r = await hyakApi.search.anime(q);
+
+    const items = Array.isArray(r.data)
+      ? r.data
+      : Array.isArray(r.data?.data)
+        ? r.data.data
+        : Array.isArray(r.data?.results)
+          ? r.data.results
+          : [];
+
+    tried.push({ q, ok: !!r.ok, count: items.length });
+
+    if (!r.ok) continue;
+
+    for (const it of items) {
+      const id = it?.id;
+      if (id == null) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      allItems.push(it);
+    }
+  }
+
+  if (!allItems.length) {
+    return { ok: true, found: false, tried, ranked: [], best: null };
+  }
+
+  let ranked = rankItems(allItems, title).slice(0, Math.max(1, limit));
+
+  // Bonus saison (copié popup)
+  const n = parseInt(seasonHint, 10);
+  if (Number.isFinite(n) && n > 1) {
+    const sTok = String(n);
+
+    ranked.sort((a, b) => {
+      const aHas =
+        normTitle(a.matchedOn || "").includes(`saison ${sTok}`) ||
+        normTitle(a.matchedOn || "").includes(`season ${sTok}`) ||
+        normTitle(a.matchedOn || "").includes(`s${sTok}`);
+      const bHas =
+        normTitle(b.matchedOn || "").includes(`saison ${sTok}`) ||
+        normTitle(b.matchedOn || "").includes(`season ${sTok}`) ||
+        normTitle(b.matchedOn || "").includes(`s${sTok}`);
+
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      return b.score - a.score;
+    });
+
+    const rootNorm = normTitle(title);
+    const filtered = ranked.filter(
+      (r) => normTitle(r.matchedOn || "") !== rootNorm,
+    );
+    if (filtered.length) ranked = filtered;
+  }
+
+  const best = ranked[0] || null;
+
+  return {
+    ok: true,
+    found: true,
+    tried,
+    ranked,
+    best,
+  };
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
@@ -640,35 +949,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         animeId = Number.parseInt(animeId, 10);
 
         if (!Number.isFinite(animeId)) {
-          const q = `${ctx.title} saison ${season}`;
-          logger.info("AUTOMARK mapping manquant → SEARCH_ANIME", {
+          logger.info("AUTOMARK mapping manquant → RESOLVE_ANIME", {
             tabId,
-            q,
+            title: ctx.title,
+            season,
             mapKey,
           });
 
-          const sr = await hyakApi.search.anime(q);
+          const rr = await resolveAnimeCore({
+            title: ctx.title,
+            seasonHint: season,
+            limit: 6,
+          });
 
-          if (sr.ok && Array.isArray(sr.data) && sr.data.length > 0) {
-            animeId = sr.data[0]?.id ?? null;
-            animeId = Number.parseInt(animeId, 10);
+          const pickedId = Number.parseInt(rr?.best?.it?.id, 10);
 
-            if (Number.isFinite(animeId)) {
-              animeLinkMap[mapKey] = {
-                animeId,
-                season,
-                titleRaw: ctx.title,
-                ts: Date.now(),
-                auto: true,
-              };
-              await chrome.storage.local.set({ animeLinkMap });
-              logger.info("AUTOMARK mapping créé", { tabId, mapKey, animeId });
-            }
-          } else {
-            logger.warn("AUTOMARK SEARCH_ANIME vide", {
+          if (rr?.found && Number.isFinite(pickedId)) {
+            animeId = pickedId;
+
+            animeLinkMap[mapKey] = {
+              animeId,
+              season,
+              titleRaw: ctx.title,
+              ts: Date.now(),
+              auto: true,
+              // trace utile pour debug
+              resolvedOn: rr?.best?.matchedOn ?? null,
+              score: rr?.best?.score ?? null,
+              tried: rr?.tried ?? [],
+            };
+
+            await chrome.storage.local.set({ animeLinkMap });
+
+            logger.info("AUTOMARK mapping créé via RESOLVE_ANIME", {
               tabId,
-              ok: sr.ok,
-              len: sr.data?.length ?? 0,
+              mapKey,
+              animeId,
+              resolvedOn: rr?.best?.matchedOn ?? null,
+              score: rr?.best?.score ?? null,
+            });
+          } else {
+            logger.warn("AUTOMARK RESOLVE_ANIME vide", {
+              tabId,
+              title: ctx.title,
+              season,
+              tried: rr?.tried ?? [],
             });
           }
         }
@@ -722,15 +1047,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             level: "info",
             kind: "step",
             scope: "automark/bg",
-            message: `🔒 Automark skip (déjà à ${wrData?.known})`,
+            message: `⏭️ Automark ignoré (déjà à jour) → ${wrData?.known ?? "?"}`,
+            data: { known: wrData?.known, wanted: wrData?.wanted },
           });
         } else {
+          await pushHistory({
+            date: Date.now(),
+            animeId,
+            oldEpisode: result?.meta?.oldEpisode ?? null,
+            newEpisode: ep,
+          });
+
           pushLog(tabId, {
             ts: Date.now(),
             level: "info",
             kind: "step",
             scope: "automark/bg",
-            message: `✅ Automark progression mise à jour → ${ep}`,
+            message: `✅ Automark progression écrite → ${ep}`,
           });
         }
 
@@ -782,6 +1115,120 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
 
         sendResponse({ ok: true, uid, data: r.data });
+        return;
+      }
+
+      // ----- HISTORY GET -----
+      if (msg?.type === "HISTORY_GET") {
+        const history = await getHistory();
+        sendResponse({ ok: true, history });
+        return;
+      }
+
+      // ----- HISTORY UNDO BY INDEX -----
+      if (msg?.type === "HISTORY_UNDO_INDEX") {
+        const index = Number(msg?.index);
+
+        const history = await getHistory();
+        if (!history.length) {
+          sendResponse({ ok: false, error: "EMPTY_HISTORY" });
+          return;
+        }
+
+        if (!Number.isFinite(index) || index < 0 || index >= history.length) {
+          sendResponse({ ok: false, error: "BAD_INDEX" });
+          return;
+        }
+
+        const entry = history[index];
+        const animeId = Number.parseInt(entry?.animeId, 10);
+
+        if (!Number.isFinite(animeId)) {
+          sendResponse({ ok: false, error: "BAD_ANIME_ID" });
+          return;
+        }
+
+        // 🔒 sécurité: on n'autorise l'undo que sur la première occurrence (la + récente) de cet animeId
+        const newestIndexForAnime = history.findIndex(
+          (x) => Number.parseInt(x?.animeId, 10) === animeId,
+        );
+
+        if (newestIndexForAnime !== index) {
+          sendResponse({ ok: false, error: "NOT_NEWEST_FOR_ANIME" });
+          return;
+        }
+
+        const { hyakanimeUid } = await chrome.storage.local.get([
+          "hyakanimeUid",
+        ]);
+        if (!hyakanimeUid) {
+          sendResponse({ ok: false, error: "NO_UID" });
+          return;
+        }
+
+        // 🔒 garde cohérence : la progression actuelle de CET animé doit matcher newEpisode
+        const current = await hyakApi.progression.detail({
+          uid: hyakanimeUid,
+          animeId,
+        });
+
+        if (!current.ok) {
+          sendResponse(current);
+          return;
+        }
+
+        const currentEp = current.data?.progress?.currentEpisode ?? null;
+        if (currentEp !== entry.newEpisode) {
+          sendResponse({ ok: false, error: "STATE_MISMATCH" });
+          return;
+        }
+
+        // ✅ appliquer undo
+        const oldEp = entry.oldEpisode;
+
+        let actionResult;
+        if (oldEp == null) {
+          actionResult = await hyakApi.progression.delete({ animeId });
+        } else {
+          actionResult = await writeProgressionDowngrade({
+            uid: hyakanimeUid,
+            animeId,
+            episode: Number(oldEp),
+          });
+        }
+
+        if (!actionResult?.ok) {
+          sendResponse(actionResult);
+          return;
+        }
+
+        // ✅ retirer uniquement cette entrée de l'historique
+        history.splice(index, 1);
+        await chrome.storage.local.set({ [HISTORY_KEY]: history });
+
+        sendResponse({ ok: true });
+        return;
+      }
+
+      // ----- RESOLVE ANIME (popup + automark) -----
+      if (msg?.type === "RESOLVE_ANIME") {
+        const title = String(msg?.title || msg?.query || "").trim();
+        const seasonHint = msg?.season ?? msg?.seasonHint ?? null;
+        const limit = Number.isFinite(msg?.limit) ? msg.limit : 6;
+
+        logger.info("RESOLVE_ANIME", { title, seasonHint, limit });
+
+        const r = await resolveAnimeCore({ title, seasonHint, limit });
+
+        logger.info("RESOLVE_ANIME résultat", {
+          ok: r.ok,
+          found: r.found,
+          bestScore: r.best?.score ?? null,
+          bestTitle: r.best?.matchedOn ?? null,
+          tried: r.tried,
+        });
+
+        sendResponse(r);
         return;
       }
 

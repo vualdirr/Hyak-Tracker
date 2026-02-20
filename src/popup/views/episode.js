@@ -352,15 +352,7 @@ function updateWriteButtonState() {
   btn.title = title;
 }
 
-// -------------------- Search / Ranking --------------------
-function buildSearchQueries(title, seasonHint) {
-  const q = String(title || "").trim();
-  const n = parseInt(seasonHint, 10);
-
-  if (!Number.isFinite(n) || n <= 1) return [q];
-  return [`${q} saison ${n}`, `${q} season ${n}`, `${q} s${n}`, q];
-}
-
+// -------------------- Search  --------------------
 async function runHyakanimeSearch({ manual }) {
   selectedAnimeId = null;
   selectedAnimeMedia = null;
@@ -378,67 +370,28 @@ async function runHyakanimeSearch({ manual }) {
   }
 
   const seasonHint = pageCtx?.season ? parseInt(pageCtx.season, 10) : null;
-  const queries = buildSearchQueries(title, seasonHint);
 
-  let allItems = [];
-  const seen = new Set();
+  // ✅ Centralisé dans le background
+  const res = await sendMessage({
+    type: "RESOLVE_ANIME",
+    title,
+    seasonHint,
+    limit: 6,
+  });
 
-  for (const q of queries) {
-    const res = await sendMessage({ type: "SEARCH_ANIME", query: q });
-    if (!res?.ok) continue;
-
-    const items = Array.isArray(res.data)
-      ? res.data
-      : Array.isArray(res.data?.data)
-        ? res.data.data
-        : Array.isArray(res.data?.results)
-          ? res.data.results
-          : [];
-
-    for (const it of items) {
-      const id = it?.id;
-      if (id == null) continue;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      allItems.push(it);
-    }
+  if (!res?.ok) {
+    showSearchButton(true);
+    return log("Erreur RESOLVE_ANIME. Réessaye.");
   }
 
-  if (!allItems.length) {
+  if (!res?.found || !Array.isArray(res.ranked) || !res.ranked.length) {
     showSearchButton(true);
     return log("Aucun résultat Hyakanime. Modifie le titre puis relance.");
   }
 
-  let ranked = rank(allItems, title).slice(0, 6);
-  if (!ranked.length) {
-    showSearchButton(true);
-    return log("Aucun résultat exploitable (ranking vide).");
-  }
+  let ranked = res.ranked.slice(0, 6);
 
-  if (Number.isFinite(seasonHint) && seasonHint > 1) {
-    const sTok = String(seasonHint);
-
-    ranked.sort((a, b) => {
-      const aHas =
-        norm(a.matchedOn || "").includes(`saison ${sTok}`) ||
-        norm(a.matchedOn || "").includes(`season ${sTok}`) ||
-        norm(a.matchedOn || "").includes(`s${sTok}`);
-      const bHas =
-        norm(b.matchedOn || "").includes(`saison ${sTok}`) ||
-        norm(b.matchedOn || "").includes(`season ${sTok}`) ||
-        norm(b.matchedOn || "").includes(`s${sTok}`);
-
-      if (aHas !== bHas) return aHas ? -1 : 1;
-      return b.score - a.score;
-    });
-  }
-
-  if (Number.isFinite(seasonHint) && seasonHint > 1) {
-    const rootNorm = norm(title);
-    const filtered = ranked.filter((r) => norm(r.matchedOn || "") !== rootNorm);
-    if (filtered.length) ranked = filtered;
-  }
-
+  // Perfect match
   if (ranked[0]?.perfect) {
     await selectAnime(ranked[0].it);
     showSearchButton(false);
@@ -447,6 +400,7 @@ async function runHyakanimeSearch({ manual }) {
     return;
   }
 
+  // Match incertain en auto
   if (!manual && ranked[0].score < 0.72) {
     showSearchButton(true);
     renderChoices(ranked);
@@ -459,6 +413,7 @@ async function runHyakanimeSearch({ manual }) {
     return;
   }
 
+  // Sélection auto du best + afficher choices
   await selectAnime(ranked[0].it);
   showSearchButton(false);
   renderChoices(ranked);
@@ -473,117 +428,6 @@ function norm(s) {
     .replace(/(vostfr|vf|multi|hd|1080p|720p|x264|x265|web|bluray)/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-function getAllTitles(anime) {
-  const arr = [];
-
-  if (anime?.displayTitle) arr.push(anime.displayTitle);
-
-  const t = anime?.titles;
-  if (t?.fr) arr.push(t.fr);
-  if (t?.en) arr.push(t.en);
-  if (t?.jp) arr.push(t.jp);
-  if (t?.romaji) arr.push(t.romaji);
-
-  if (anime?.title) arr.push(anime.title);
-  if (anime?.titleEN) arr.push(anime.titleEN);
-  if (anime?.titleJP) arr.push(anime.titleJP);
-  if (anime?.romanji) arr.push(anime.romanji);
-  if (Array.isArray(anime?.alt)) arr.push(...anime.alt);
-
-  return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))];
-}
-
-function similarity(a, b) {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-
-  const A = new Set(a.split(" ").filter(Boolean));
-  const B = new Set(b.split(" ").filter(Boolean));
-  const inter = [...A].filter((x) => B.has(x)).length;
-  const union = new Set([...A, ...B]).size;
-  const jacc = union ? inter / union : 0;
-
-  let i = 0;
-  for (; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) break;
-  const prefix = i / Math.max(a.length, b.length);
-
-  return Math.max(jacc, prefix * 0.85);
-}
-
-function levenshtein(a, b) {
-  const m = a.length,
-    n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-
-  const dp = new Array(n + 1);
-  for (let j = 0; j <= n; j++) dp[j] = j;
-
-  for (let i = 1; i <= m; i++) {
-    let prev = dp[0];
-    dp[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const temp = dp[j];
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
-      prev = temp;
-    }
-  }
-  return dp[n];
-}
-
-function editSimilarity(a, b) {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  const d = levenshtein(a, b);
-  const maxLen = Math.max(a.length, b.length);
-  return maxLen ? 1 - d / maxLen : 0;
-}
-
-function rank(items, query) {
-  const q = norm(query);
-
-  const ranked = items.map((it) => {
-    const titles = getAllTitles(it)
-      .map((raw) => ({ raw, n: norm(raw) }))
-      .filter((x) => x.n);
-
-    for (const t of titles) {
-      if (t.n === q) {
-        return { it, score: 1.0, matchedOn: t.raw, perfect: true };
-      }
-    }
-
-    let best = 0;
-    let matchedOn = null;
-
-    for (const t of titles) {
-      if (t.n.includes(q) || q.includes(t.n)) {
-        if (0.95 > best) {
-          best = 0.95;
-          matchedOn = t.raw;
-        }
-        continue;
-      }
-
-      const s1 = similarity(q, t.n);
-      const s2 = editSimilarity(q, t.n);
-      const s = Math.max(s1, s2);
-
-      if (s > best) {
-        best = s;
-        matchedOn = t.raw;
-      }
-    }
-
-    const quasiPerfect = best >= 0.92;
-    return { it, score: best, matchedOn, perfect: quasiPerfect };
-  });
-
-  ranked.sort((a, b) => b.score - a.score);
-  return ranked;
 }
 
 // -------------------- Choices UI --------------------

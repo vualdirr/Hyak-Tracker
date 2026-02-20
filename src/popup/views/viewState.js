@@ -19,6 +19,12 @@ export function setView(next) {
     currentView !== "unsupported",
   );
 
-  // Banner visible partout sauf settings
-  $("banner")?.classList.toggle("hidden", currentView === "settings");
+  // ✅ history view
+  $("viewHistory")?.classList.toggle("hidden", currentView !== "history");
+
+  // ✅ Banner masqué sur settings + history (comme tu veux)
+  $("banner")?.classList.toggle(
+    "hidden",
+    currentView === "settings" || currentView === "history",
+  );
 }
