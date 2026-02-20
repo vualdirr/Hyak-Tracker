@@ -352,15 +352,7 @@ function updateWriteButtonState() {
   btn.title = title;
 }
 
-// -------------------- Search / Ranking --------------------
-function buildSearchQueries(title, seasonHint) {
-  const q = String(title || "").trim();
-  const n = parseInt(seasonHint, 10);
-
-  if (!Number.isFinite(n) || n <= 1) return [q];
-  return [`${q} saison ${n}`, `${q} season ${n}`, `${q} s${n}`, q];
-}
-
+// -------------------- Search  --------------------
 async function runHyakanimeSearch({ manual }) {
   selectedAnimeId = null;
   selectedAnimeMedia = null;
@@ -378,67 +370,28 @@ async function runHyakanimeSearch({ manual }) {
   }
 
   const seasonHint = pageCtx?.season ? parseInt(pageCtx.season, 10) : null;
-  const queries = buildSearchQueries(title, seasonHint);
 
-  let allItems = [];
-  const seen = new Set();
+  // ✅ Centralisé dans le background
+  const res = await sendMessage({
+    type: "RESOLVE_ANIME",
+    title,
+    seasonHint,
+    limit: 6,
+  });
 
-  for (const q of queries) {
-    const res = await sendMessage({ type: "SEARCH_ANIME", query: q });
-    if (!res?.ok) continue;
-
-    const items = Array.isArray(res.data)
-      ? res.data
-      : Array.isArray(res.data?.data)
-        ? res.data.data
-        : Array.isArray(res.data?.results)
-          ? res.data.results
-          : [];
-
-    for (const it of items) {
-      const id = it?.id;
-      if (id == null) continue;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      allItems.push(it);
-    }
+  if (!res?.ok) {
+    showSearchButton(true);
+    return log("Erreur RESOLVE_ANIME. Réessaye.");
   }
 
-  if (!allItems.length) {
+  if (!res?.found || !Array.isArray(res.ranked) || !res.ranked.length) {
     showSearchButton(true);
     return log("Aucun résultat Hyakanime. Modifie le titre puis relance.");
   }
 
-  let ranked = rank(allItems, title).slice(0, 6);
-  if (!ranked.length) {
-    showSearchButton(true);
-    return log("Aucun résultat exploitable (ranking vide).");
-  }
+  let ranked = res.ranked.slice(0, 6);
 
-  if (Number.isFinite(seasonHint) && seasonHint > 1) {
-    const sTok = String(seasonHint);
-
-    ranked.sort((a, b) => {
-      const aHas =
-        norm(a.matchedOn || "").includes(`saison ${sTok}`) ||
-        norm(a.matchedOn || "").includes(`season ${sTok}`) ||
-        norm(a.matchedOn || "").includes(`s${sTok}`);
-      const bHas =
-        norm(b.matchedOn || "").includes(`saison ${sTok}`) ||
-        norm(b.matchedOn || "").includes(`season ${sTok}`) ||
-        norm(b.matchedOn || "").includes(`s${sTok}`);
-
-      if (aHas !== bHas) return aHas ? -1 : 1;
-      return b.score - a.score;
-    });
-  }
-
-  if (Number.isFinite(seasonHint) && seasonHint > 1) {
-    const rootNorm = norm(title);
-    const filtered = ranked.filter((r) => norm(r.matchedOn || "") !== rootNorm);
-    if (filtered.length) ranked = filtered;
-  }
-
+  // Perfect match
   if (ranked[0]?.perfect) {
     await selectAnime(ranked[0].it);
     showSearchButton(false);
@@ -447,6 +400,7 @@ async function runHyakanimeSearch({ manual }) {
     return;
   }
 
+  // Match incertain en auto
   if (!manual && ranked[0].score < 0.72) {
     showSearchButton(true);
     renderChoices(ranked);
@@ -459,6 +413,7 @@ async function runHyakanimeSearch({ manual }) {
     return;
   }
 
+  // Sélection auto du best + afficher choices
   await selectAnime(ranked[0].it);
   showSearchButton(false);
   renderChoices(ranked);
