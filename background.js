@@ -232,6 +232,8 @@ async function writeProgressionCore({ uid, animeId, episode }) {
 
   const totalEpisodes = detail?.media?.totalEpisodes ?? null;
 
+  const mediaStatus = detail?.media?.status ?? null;
+
   const existingStatus = detail?.progress?.status ?? null; // 1..6
   const existingStart = detail?.progress?.startDate ?? null;
   const existingEnd = detail?.progress?.endDate ?? null;
@@ -242,7 +244,9 @@ async function writeProgressionCore({ uid, animeId, episode }) {
   // 2) Status commun
   let status = existingStatus ?? 1;
   const canDecideFinish = Number.isFinite(totalEpisodes) && totalEpisodes > 0;
-  const willFinish = canDecideFinish && episode >= totalEpisodes;
+  const isMediaFinished = mediaStatus === 3;
+  const willFinish =
+    canDecideFinish && isMediaFinished && episode >= totalEpisodes;
 
   if (willFinish) {
     status = 3;
