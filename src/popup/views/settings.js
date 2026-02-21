@@ -13,7 +13,6 @@ const STORAGE_KEYS = {
 const DEFAULT_SETTINGS = {
   autoMark: false,
   debug: false,
-  qoe: true,
 };
 
 let handlersBound = false;
@@ -98,7 +97,6 @@ export async function getSettings() {
       ...cur,
       autoMark: !!cur.autoMark,
       debug: !!cur.debug,
-      qoe: !!cur.qoe,
     };
   }
 
@@ -116,7 +114,6 @@ export async function updateSettings(patch) {
     ...patch,
     autoMark: patch?.autoMark != null ? !!patch.autoMark : !!cur.autoMark,
     debug: patch?.debug != null ? !!patch.debug : !!cur.debug,
-    qoe: patch?.qoe != null ? !!patch.qoe : !!cur.qoe,
   };
 
   await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: next });

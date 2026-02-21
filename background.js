@@ -730,7 +730,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       if (msg?.type === "GET_STREAM_CONTEXT") {
         const tabId = sender?.tab?.id ?? msg?.tabId;
-        logger.debug("GET_STREAM_CONTEXT", { tabId });
         if (!tabId) {
           sendResponse({ ok: false, error: "NO_TAB" });
           return;
